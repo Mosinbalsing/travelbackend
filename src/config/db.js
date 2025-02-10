@@ -13,6 +13,8 @@ const pool = mysql2.createPool({
     waitForConnections: true
 });
 
+
+
 const checkConnection = async () => {
     try {
         const connection = await pool.getConnection();

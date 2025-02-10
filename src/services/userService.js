@@ -65,4 +65,29 @@ const loginUser = async (email, password) => {
   }
 };
 
-module.exports = { registerUser, loginUser }; // ✅ Correct export
+const getUserFromToken = async (token)=>{
+  try {
+    const trimToken = token.trim();
+    const decodeToken = jwt.verify(trimToken, JWT_SECRET);
+    console.log(decodeToken.id);
+    
+    const [rows] = await pool.query(`SELECT * FROM users WHERE email = ?`, [decodeToken.email])
+    if (rows.length === 0) {
+      return { success: false, message: "User not found" };
+    }
+
+    return { success: true, user: rows[0] };
+
+    console.log("🤗getuserdata service is running");
+    
+  } catch (error) {
+    console.error("Login error:", error);
+    return {
+      success: false,
+      message: "invalid token",
+      error: error.message,
+    };
+  }
+}
+
+module.exports = { registerUser, loginUser , getUserFromToken }; // ✅ Correct export

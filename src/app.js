@@ -1,7 +1,7 @@
 const express = require('express'); 
 const { checkConnection } = require('./config/db.js');
 const { createTable } = require('./utils/dbUtils.js');
-const authRoutes = require('./routes/authRoutes.js'); // ✅ Fix import
+const authRoutes = require('./routes/authRoutes.js'); //✅ Fix import
 const cors = require("cors");
 
 const app = express();

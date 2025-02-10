@@ -1,15 +1,26 @@
 const express = require('express'); 
 const { checkConnection } = require('./config/db.js');
 const { createTable } = require('./utils/dbUtils.js');
-const authRoutes = require('./routes/authRoutes.js'); //✅ Fix import
+const authRoutes = require('./routes/authRoutes.js');
 const cors = require("cors");
 
 const app = express();
 
+// Configure CORS with options
+app.use(cors({
+  origin: ["http://localhost:5173", "https://shreetourstraveling.vercel.app/"], // Add your frontend URLs
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200
+}));
+
+// Other middleware
 app.use(express.json());  
-app.use(cors());
 app.use(express.urlencoded({ extended: true }));
-app.use('/api/auth', authRoutes); // ✅ Ensure authRoutes is defined
+
+// Routes
+app.use('/api/auth', authRoutes);
 
 app.listen(3000, async () => {
   console.log('Server running on port 3000');

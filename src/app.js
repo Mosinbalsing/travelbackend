@@ -8,7 +8,7 @@ const app = express();
 
 // Configure CORS with options
 app.use(cors({
-  origin: ["http://localhost:5173", "https://shreetourstraveling.vercel.app/"], // Add your frontend URLs
+  origin: "*" , // Add your frontend URLs
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,

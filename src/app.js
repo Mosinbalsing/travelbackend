@@ -1,6 +1,6 @@
 const express = require('express'); 
 const { checkConnection } = require('./config/db.js');
-const { createTable } = require('./utils/dbUtils.js');
+const { initializeDatabase } = require('./utils/dbUtils.js');
 const authRoutes = require('./routes/authRoutes.js');
 const cors = require("cors");
 
@@ -27,11 +27,21 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/auth', authRoutes);
 
+// Initialize database tables
+(async () => {
+  try {
+    await initializeDatabase();
+    console.log('Database initialized successfully');
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  }
+})();
+
 app.listen(3000, async () => {
   console.log('Server running on port 3000');
   try {
     await checkConnection();
-    await createTable();
   } catch (error) {
     console.error('Failed to initialize the database:', error); 
   }

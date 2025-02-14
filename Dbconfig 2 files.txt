@@ -78,3 +78,31 @@ const checkConnection = async () => {
 // ✅ Correct export syntax
 module.exports = { pool, checkConnection };
 old one------------------------------------------------------------------------------------------------------------------------------
+const deleteTaxiData = async () => {
+  try {
+    await pool.query(`DELETE FROM AvailableTaxis;
+
+          `);
+    console.log("✅ Taxi data deleted successfully!");
+  } catch (error) {
+    console.error("❌ Error inserting taxi data:", error);
+  }
+};
+------------------------------------------------------
+const deleteTaxicolum = async () => {
+  try {
+    await pool.query(`
+        ALTER TABLE AvailableTaxis 
+        DROP COLUMN AvailableDate, 
+        DROP COLUMN SeatingCapacity,
+        DROP COLUMN  Prime_SUV_VehicleNumber,
+        DROP COLUMN Sedan_VehicleNumber,
+        DROP COLUMN Hatchback_VehicleNumber,
+        DROP COLUMN SUV_VehicleNumber;
+
+          `);
+    console.log("✅ Taxi data column deleted successfully!");
+  } catch (error) {
+    console.error("❌ Error inserting taxi data:", error);
+  }
+};

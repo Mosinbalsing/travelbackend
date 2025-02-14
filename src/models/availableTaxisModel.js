@@ -8,16 +8,10 @@ class AvailableTaxisModel {
         this.Hatchback_Price = taxi.Hatchback_Price;
         this.SUV_Price = taxi.SUV_Price;
         this.Prime_SUV_Price = taxi.Prime_SUV_Price;
-        this.Sedan_isAvailable = taxi.Sedan_isAvailable;
-        this.Hatchback_isAvailable = taxi.Hatchback_isAvailable;
-        this.SUV_isAvailable = taxi.SUV_isAvailable;
-        this.Prime_SUV_isAvailable = taxi.Prime_SUV_isAvailable;
-        this.Sedan_VehicleNumber = taxi.Sedan_VehicleNumber;
-        this.Hatchback_VehicleNumber = taxi.Hatchback_VehicleNumber;
-        this.SUV_VehicleNumber = taxi.SUV_VehicleNumber;
-        this.Prime_SUV_VehicleNumber = taxi.Prime_SUV_VehicleNumber;
-        this.SeatingCapacity = taxi.SeatingCapacity;
-        this.AvailableDate = taxi.AvailableDate || new Date();
+        this.Sedan_Available = taxi.Sedan_Available;
+        this.Hatchback_Available = taxi.Hatchback_Available;
+        this.SUV_Available = taxi.SUV_Available;
+        this.Prime_SUV_Available = taxi.Prime_SUV_Available;
     }
 }
 

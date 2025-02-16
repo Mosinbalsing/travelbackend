@@ -1,7 +1,7 @@
 const express = require('express'); 
 const { checkConnection } = require('./config/db.js');
 const { initializeDatabase } = require('./utils/dbUtils.js');
-const authRoutes = require('./routes/authRoutes.js');
+const authRoutes = require('./routes/authRoutes');
 const cors = require("cors");
 
 const app = express();

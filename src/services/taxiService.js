@@ -89,8 +89,9 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
         const availableVehicles = [];
         
         const processedData = rows.map(row => {
-            if (row.Sedan) availableVehicles.push(row.Sedan);
+            
             if (row.Hatchback) availableVehicles.push(row.Hatchback);
+            if (row.Sedan) availableVehicles.push(row.Sedan);
             if (row.SUV) availableVehicles.push(row.SUV);
             if (row.Prime_SUV) availableVehicles.push(row.Prime_SUV);
 

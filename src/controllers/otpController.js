@@ -4,9 +4,9 @@ const sendOTPController = async (req, res) => {
     try {
         const { phoneNumber, userName} = req.body;
         console.log(phoneNumber, userName);
-        console.log(req.body);
+        
         // Validate input
-        if (!phoneNumber || !userName) {
+        if (!phoneNumber) {
             return res.status(400).json({
                 success: false,
                 message: "Phone number and username are required"
@@ -21,7 +21,7 @@ const sendOTPController = async (req, res) => {
             });
         }
 
-        const result = await sendOTP(phoneNumber, userName);
+        const result = await sendOTP(phoneNumber);
         
         if (result.success) {
             return res.status(200).json(result);

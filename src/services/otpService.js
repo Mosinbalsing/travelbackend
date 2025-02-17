@@ -7,27 +7,32 @@ const generateOTP = () => {
     return Math.floor(100000 + Math.random() * 900000);
 };
 
-const sendOTP = async (phoneNumber, username) => {
+const sendOTP = async (phoneNumber) => {
     try {
         const otp = generateOTP();
         
+        if (!process.env.FAST2SMS_API_KEY) {
+            throw new Error('Fast2SMS API key is not configured');
+        }
+
+        // Using correct format for OTP route
         const options = {
             method: 'GET',
             url: 'https://www.fast2sms.com/dev/bulkV2',
             params: {
                 authorization: process.env.FAST2SMS_API_KEY.trim(),
-                message: `Hello ${username} , Thank you for using our service. Your OTP is: ${otp} . Please do not share this OTP with anyone. Regards, Shree Travels`,
-                language: 'english',
+                variables_values: otp.toString(),  // Only send the OTP number
                 route: 'otp',
                 numbers: phoneNumber.trim()
             }
         };
 
+        console.log('Sending OTP:', otp, 'to:', phoneNumber);
+
         const response = await axios.request(options);
         console.log('Fast2SMS Response:', response.data);
 
         if (response.data.return === true) {
-            // Store OTP with timestamp
             otpStore.set(phoneNumber, {
                 otp,
                 timestamp: Date.now(),

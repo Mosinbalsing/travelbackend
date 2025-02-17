@@ -17,6 +17,7 @@ app.use(cors({
   optionsSuccessStatus: 204
 }));
 
+
 // Enable pre-flight requests for all routes
 app.options('*', cors());
 

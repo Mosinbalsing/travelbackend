@@ -18,7 +18,7 @@ const sendOTP = async (phoneNumber, username) => {
                 authorization: process.env.FAST2SMS_API_KEY.trim(),
                 message: `Hello ${username} , Thank you for using our service. Your OTP is: ${otp} . Please do not share this OTP with anyone. Regards, Shree Travels`,
                 language: 'english',
-                route: 'q',
+                route: 'otp',
                 numbers: phoneNumber.trim()
             }
         };

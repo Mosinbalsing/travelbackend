@@ -3,6 +3,7 @@ const { checkConnection } = require('./config/db.js');
 const { initializeDatabase } = require('./utils/dbUtils.js');
 const authRoutes = require('./routes/authRoutes');
 const cors = require("cors");
+const bookingRoutes = require('./routes/bookingRoutes');
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', bookingRoutes);
 
 // Initialize database tables
 (async () => {

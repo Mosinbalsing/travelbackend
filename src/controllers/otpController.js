@@ -2,8 +2,8 @@ const { sendOTP, verifyOTP } = require("../services/otpService");
 
 const sendOTPController = async (req, res) => {
     try {
-        const { phoneNumber, userName} = req.body;
-        console.log(phoneNumber, userName);
+        const { phoneNumber} = req.body;
+        console.log(phoneNumber);
         
         // Validate input
         if (!phoneNumber) {

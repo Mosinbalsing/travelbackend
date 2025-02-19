@@ -64,12 +64,6 @@ const verifyOTP = async (phoneNumber, userOTP) => {
     try {
         const storedOTPData = otpStore.get(phoneNumber);
         
-        // Debug logs
-        console.log('Verification Request:');
-        console.log('Phone Number:', phoneNumber);
-        console.log('User OTP:', userOTP, 'Type:', typeof userOTP);
-        console.log('Stored Data:', storedOTPData);
-        
         if (!storedOTPData) {
             return {
                 success: false,
@@ -77,28 +71,17 @@ const verifyOTP = async (phoneNumber, userOTP) => {
             };
         }
 
-        // Ensure proper type conversion
-        const userOTPNumber = Number(userOTP);
-        const storedOTPNumber = Number(storedOTPData.otp);
+        // Check if OTP is expired (10 minutes validity)
+        if (Date.now() - storedOTPData.timestamp > 10 * 60 * 1000) {  // Changed to 10 minutes
+            otpStore.delete(phoneNumber);
+            return {
+                success: false,
+                message: "OTP expired"
+            };
+        }
 
-        // Debug OTP comparison
-        console.log('Comparing:');
-        console.log('User OTP (converted):', userOTPNumber, 'Type:', typeof userOTPNumber);
-        console.log('Stored OTP (converted):', storedOTPNumber, 'Type:', typeof storedOTPNumber);
-        console.log('Are equal?:', userOTPNumber === storedOTPNumber);
-
-        // Check if OTP matches
-        if (userOTPNumber === storedOTPNumber) {
-            // Check expiry
-            if (Date.now() - storedOTPData.timestamp > 5 * 60 * 1000) {
-                otpStore.delete(phoneNumber);
-                return {
-                    success: false,
-                    message: "OTP expired"
-                };
-            }
-
-            // OTP is valid and not expired
+        // Rest of your verification logic...
+        if (parseInt(userOTP) === storedOTPData.otp) {
             otpStore.delete(phoneNumber);
             return {
                 success: true,
@@ -109,9 +92,7 @@ const verifyOTP = async (phoneNumber, userOTP) => {
 
         // Increment attempts
         storedOTPData.attempts += 1;
-        console.log('Attempt count:', storedOTPData.attempts);
 
-        // Check max attempts
         if (storedOTPData.attempts >= 3) {
             otpStore.delete(phoneNumber);
             return {
@@ -122,11 +103,7 @@ const verifyOTP = async (phoneNumber, userOTP) => {
 
         return {
             success: false,
-            message: "Invalid OTP",
-            debug: {
-                received: userOTPNumber,
-                expected: storedOTPNumber
-            }
+            message: "Invalid OTP"
         };
 
     } catch (error) {

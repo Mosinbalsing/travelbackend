@@ -1,153 +1,104 @@
 const { pool } = require("../config/db");
 
-// Function to create tables only
-const createTables = async () => {
+const createTablesIfNotExist = async () => {
+  const connection = await pool.getConnection();
+  
   try {
-    // Create AvailableTaxis table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS AvailableTaxis (
-          TaxiID INT AUTO_INCREMENT PRIMARY KEY,
-          UserID INT,
-          PickupLocation VARCHAR(255) NOT NULL,
-          DropLocation VARCHAR(255) NOT NULL,
-          Sedan_Price DECIMAL(10,2),
-          Hatchback_Price DECIMAL(10,2),
-          SUV_Price DECIMAL(10,2),
-          Prime_SUV_Price DECIMAL(10,2),
-          Sedan_Available INT DEFAULT 4,
-          Hatchback_Available INT DEFAULT 2,
-          SUV_Available INT DEFAULT 1,
-          Prime_SUV_Available INT DEFAULT 1
-      )
+    await connection.beginTransaction();
+
+    // Check if tables exist
+    const [tables] = await connection.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE()
+      AND table_name IN ('AvailableTaxis', 'bookings')
     `);
 
-    // Create BookedTaxis table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS BookedTaxis (
-          BookingID INT AUTO_INCREMENT PRIMARY KEY,
-          TaxiID INT,
-          UserID INT,
-          VehicleType ENUM('Sedan', 'Hatchback', 'SUV', 'Prime_SUV'),
-          BookedDate DATE NOT NULL,
-          FOREIGN KEY (TaxiID) REFERENCES AvailableTaxis(TaxiID)
-      )
-    `);
+    const existingTables = tables.map(t => t.TABLE_NAME);
+    console.log("Existing tables:", existingTables);
 
-    console.log("✅ Tables created successfully!");
-  } catch (error) {
-    console.error("❌ Error in creating tables:", error);
-    throw error;
-  }
-};
-
-// Function to drop tables (use carefully!)
-const dropTables = async () => {
-  try {
-    await pool.query(`DROP TABLE IF EXISTS BookedTaxis`);
-    await pool.query(`DROP TABLE IF EXISTS AvailableTaxis`);
-    console.log("✅ Tables dropped successfully!");
-  } catch (error) {
-    console.error("❌ Error in dropping tables:", error);
-    throw error;
-  }
-};
-
-// Function to insert initial data if table is empty
-const insertInitialData = async () => {
-  try {
-    // Check if data already exists
-    const [existingData] = await pool.query('SELECT COUNT(*) as count FROM AvailableTaxis');
-    
-    if (existingData[0].count === 0) {
-      await pool.query(`
-        INSERT INTO AvailableTaxis 
-        (PickupLocation, DropLocation, 
-         Sedan_Price, Hatchback_Price, SUV_Price, Prime_SUV_Price,
-         Sedan_Available, Hatchback_Available, SUV_Available, Prime_SUV_Available)
-        VALUES
-        ('Pune', 'Mumbai', 2500, 2000, 3500, 4500, 4, 2, 1, 1),
-        ('Pune', 'Kolhapur', 3700, 3200, 4500, 5500, 4, 2, 1, 1),
-        ('Pune', 'Alibaug', 3500, 3000, 4000, 4500, 4, 2, 1, 1),
-        ('Pune', 'Satara', 2500, 2000, 4500, 5500, 4, 2, 1, 1),
-        ('Pune', 'Mahabaleshwar', 2500, 2000, 3500, 4500, 4, 2, 1, 1)
+    // Create AvailableTaxis if it doesn't exist
+    if (!existingTables.includes('AvailableTaxis')) {
+      console.log("Creating AvailableTaxis table...");
+      await connection.query(`
+        CREATE TABLE AvailableTaxis (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            pickup_location VARCHAR(255) NOT NULL,
+            drop_location VARCHAR(255) NOT NULL,
+            Sedan_Available INT DEFAULT 0,
+            Hatchback_Available INT DEFAULT 0,
+            SUV_Available INT DEFAULT 0,
+            Prime_SUV_Available INT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
-      console.log("✅ Initial data inserted successfully!");
-    } else {
-      console.log("ℹ️ Data already exists, skipping initial insert");
+
+      // Insert initial data only if table was just created
+      console.log("Inserting initial data...");
+      await connection.query(`
+        INSERT INTO AvailableTaxis 
+        (pickup_location, drop_location, Sedan_Available, Hatchback_Available, SUV_Available, Prime_SUV_Available)
+        VALUES 
+        ('Mumbai', 'Pune', 5, 5, 5, 5),
+        ('Pune', 'Mumbai', 5, 5, 5, 5),
+        ('Mumbai', 'Nashik', 5, 5, 5, 5),
+        ('Nashik', 'Mumbai', 5, 5, 5, 5),
+        ('Pune', 'Nashik', 5, 5, 5, 5),
+        ('Nashik', 'Pune', 5, 5, 5, 5)
+      `);
     }
+
+    // Create bookings if it doesn't exist
+    if (!existingTables.includes('bookings')) {
+      console.log("Creating bookings table...");
+      await connection.query(`
+        CREATE TABLE bookings (
+            booking_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(255) NOT NULL,
+            taxi_id INT UNSIGNED,
+            booking_date DATETIME NOT NULL,
+            pickup_location VARCHAR(255) NOT NULL,
+            pickup_address TEXT NOT NULL,
+            pickup_city VARCHAR(255) NOT NULL,
+            pickup_pincode VARCHAR(10) NOT NULL,
+            drop_location VARCHAR(255) NOT NULL,
+            travel_date DATE NOT NULL,
+            pickup_time TIME NOT NULL,
+            vehicle_type ENUM('sedan', 'hatchback', 'suv', 'prime suv') NOT NULL,
+            number_of_passengers INT NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_taxi_id (taxi_id),
+            CONSTRAINT fk_taxi FOREIGN KEY (taxi_id) 
+            REFERENCES AvailableTaxis(id) ON DELETE SET NULL ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+    }
+
+    await connection.commit();
+    console.log("✅ Database check completed successfully!");
+
   } catch (error) {
-    console.error("❌ Error in inserting initial data:", error);
+    await connection.rollback();
+    console.error("❌ Error in database operations:", error);
     throw error;
+  } finally {
+    connection.release();
   }
 };
 
-// Function to add new route
-const addNewRoute = async (pickupLocation, dropLocation, prices) => {
-  try {
-    await pool.query(`
-      INSERT INTO AvailableTaxis 
-      (PickupLocation, DropLocation, 
-       Sedan_Price, Hatchback_Price, SUV_Price, Prime_SUV_Price,
-       Sedan_Available, Hatchback_Available, SUV_Available, Prime_SUV_Available)
-      VALUES (?, ?, ?, ?, ?, ?, 4, 2, 1, 1)
-    `, [
-      pickupLocation, 
-      dropLocation, 
-      prices.sedanPrice, 
-      prices.hatchbackPrice, 
-      prices.suvPrice, 
-      prices.primeSuvPrice
-    ]);
-    console.log("✅ New route added successfully!");
-    return true;
-  } catch (error) {
-    console.error("❌ Error in adding new route:", error);
-    throw error;
-  }
-};
-
-// Function to update route prices
-const updateRoutePrices = async (taxiId, prices) => {
-  try {
-    await pool.query(`
-      UPDATE AvailableTaxis 
-      SET Sedan_Price = ?,
-          Hatchback_Price = ?,
-          SUV_Price = ?,
-          Prime_SUV_Price = ?
-      WHERE TaxiID = ?
-    `, [
-      prices.sedanPrice, 
-      prices.hatchbackPrice, 
-      prices.suvPrice, 
-      prices.primeSuvPrice,
-      taxiId
-    ]);
-    console.log("✅ Route prices updated successfully!");
-    return true;
-  } catch (error) {
-    console.error("❌ Error in updating route prices:", error);
-    throw error;
-  }
-};
-
-// Initialize database (create tables and add initial data if needed)
 const initializeDatabase = async () => {
   try {
-    await createTables();
-    await insertInitialData();
-    console.log("✅ Database initialized successfully!");
+    await createTablesIfNotExist();
+    console.log("✅ Database initialization completed!");
   } catch (error) {
-    console.error("❌ Error in database initialization:", error);
-    throw error;
+    console.error("❌ Database initialization failed:", error);
+    // Don't exit process, just log the error
+    console.error(error);
   }
 };
 
-module.exports = { 
-  createTables, 
-  dropTables, 
-  insertInitialData, 
-  addNewRoute, 
-  updateRoutePrices,
-  initializeDatabase 
-};
+module.exports = { createTablesIfNotExist, initializeDatabase };

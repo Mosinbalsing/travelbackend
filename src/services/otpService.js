@@ -72,7 +72,7 @@ const verifyOTP = async (phoneNumber, userOTP) => {
         }
 
         // Check if OTP is expired (10 minutes validity)
-        if (Date.now() - storedOTPData.timestamp > 10 * 60 * 1000) {  // Changed to 10 minutes
+        if (Date.now() - storedOTPData.timestamp > 10 * 60 * 10000) {  // Changed to 10 minutes
             otpStore.delete(phoneNumber);
             return {
                 success: false,

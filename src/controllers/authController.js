@@ -53,33 +53,28 @@ const login = async (req, res) => {
 
 const getUserFromTokencontroller = async (req, res) => {
     try {
-        // First check if headers exist at all
-        if (!req.headers) {
-            return res.status(401).json({ success: false, message: "No headers found in request" });
-        }
-
-        // Then check authorization header
-        const authHeader = req.headers.authorization;
-        if (!authHeader) {
-            return res.status(401).json({ success: false, message: "Authorization header is missing" });
-        }
-
-        // Check if it's a Bearer token
-        if (!authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({ success: false, message: "Invalid token format. Use 'Bearer <token>'" });
-        }
-
-        const token = authHeader.split(' ')[1];
-        const response = await getUserFromToken(token); // Using the service function
+        const token = req.headers.authorization?.split(' ')[1];
         
-        if (response.success) {
-            return res.status(200).json(response);
-        } else {
-            return res.status(401).json(response);
+        const result = await getUserFromToken(token);
+
+        if (result.error) {
+            return res.status(result.status || 401).json({
+                success: false,
+                message: result.message
+            });
         }
+
+        res.json({
+            success: true,
+            user: result.user
+        });
+
     } catch (error) {
-        console.error("Token Verification Error:", error);
-        return res.status(500).json({ success: false, message: "Failed to verify token" });
+        console.error('Login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
     }
 };
 

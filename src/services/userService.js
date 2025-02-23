@@ -65,32 +65,50 @@ const loginUser = async (email, password) => {
   }
 };
 
-const getUserFromToken = async (token)=>{
-  try {
-    const trimToken = token.trim();
-    const decodeToken = jwt.verify(trimToken, JWT_SECRET);
-    console.log(decodeToken.id);
-    
-    const [rows] = await pool.query(`SELECT * FROM users WHERE email = ?`, [decodeToken.email])
-    if (rows.length === 0) {
-      return { success: false, message: "User not found" };
+const getUserFromToken = async (token) => {
+    try {
+        if (!token) {
+            throw new Error('No token provided');
+        }
+
+        // Verify the token and handle expiration
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
+        } catch (err) {
+            if (err.name === 'TokenExpiredError') {
+                // Token has expired, return error object
+                return {
+                    error: true,
+                    message: 'Token has expired, please login again',
+                    status: 401
+                };
+            }
+            throw err;
+        }
+
+        // Get user from database
+        const [users] = await pool.query(
+            'SELECT * FROM users WHERE id = ?',
+            [decoded.id]
+        );
+
+        if (users.length === 0) {
+            throw new Error('User not found');
+        }
+
+        return {
+            error: false,
+            user: users[0]
+        };
+    } catch (error) {
+        console.error('Error in getUserFromToken:', error);
+        return {
+            error: true,
+            message: error.message,
+            status: 500
+        };
     }
+};
 
-    return { success: true, user: rows[0] };
-
-    console.log("🤗getuserdata service is running");
-    
-  } catch (error) {
-    console.error("Login error:", error);
-    return {
-      success: false,
-      message: "invalid token",
-      error: error.message,
-    };
-  }
-}
-
-
-
-
-module.exports = { registerUser, loginUser , getUserFromToken }; // ✅ Correct export
+module.exports = { registerUser, loginUser, getUserFromToken }; // ✅ Correct export

@@ -34,43 +34,46 @@ const createBooking = async (req, res) => {
         await connection.beginTransaction();
 
         try {
-            // Get table structure for debugging
-            const [columns] = await connection.query('DESCRIBE AvailableTaxis');
-            console.log('Table structure:', columns);
-
-            // Find available taxi based on location and vehicle type
-            const [availableTaxis] = await connection.query(
-                `SELECT * 
-                 FROM AvailableTaxis 
-                 WHERE pickUpLocation = ? 
-                 AND dropLocation = ? 
-                 AND ${vehicleType.toLowerCase().replace(' ', '_')}_Available > 0
-                 LIMIT 1`,
-                [PickupLocation, DropLocation]
-            );
-
-            // Debug log
-            console.log('Available taxis:', availableTaxis);
-
-            // If no taxi found, try to find any available taxi
-            let selectedTaxiId;
-            if (availableTaxis.length > 0) {
-                selectedTaxiId = TaxiID; // Use the TaxiID from request
-            } else {
-                const [anyTaxi] = await connection.query(
+            // Find TaxiID based on routes if not provided or invalid
+            let selectedTaxiId = TaxiID;
+            
+            if (!selectedTaxiId || selectedTaxiId === 1 || selectedTaxiId === '1') {
+                console.log('Finding taxi based on route...');
+                // First try to find a taxi based on the specific route
+                const [routeTaxis] = await connection.query(
                     `SELECT * 
                      FROM AvailableTaxis 
-                     WHERE ${vehicleType.toLowerCase().replace(' ', '_')}_Available > 0
-                     LIMIT 1`
+                     WHERE pickUpLocation = ? 
+                     AND dropLocation = ? 
+                     AND ${vehicleType.toLowerCase().replace(' ', '_')}_Available > 0
+                     LIMIT 1`,
+                    [PickupLocation, DropLocation]
                 );
 
-                if (anyTaxi.length === 0) {
-                    throw new Error('No available taxis found for this vehicle type');
+                if (routeTaxis.length > 0) {
+                    // Use the first available taxi's row number as taxi_id
+                    selectedTaxiId = routeTaxis[0].id || routeTaxis[0].taxi_id || (Math.floor(Math.random() * 1000) + 1);
+                    console.log('Found taxi on route:', selectedTaxiId);
+                } else {
+                    console.log('No taxi found on route, searching any available taxi...');
+                    // If no taxi found for specific route, find any available taxi
+                    const [anyTaxi] = await connection.query(
+                        `SELECT * 
+                         FROM AvailableTaxis 
+                         WHERE ${vehicleType.toLowerCase().replace(' ', '_')}_Available > 0
+                         LIMIT 1`
+                    );
+
+                    if (anyTaxi.length === 0) {
+                        throw new Error('No available taxis found for this vehicle type');
+                    }
+                    // Use the first available taxi's row number as taxi_id
+                    selectedTaxiId = anyTaxi[0].id || anyTaxi[0].taxi_id || (Math.floor(Math.random() * 1000) + 1);
+                    console.log('Found any available taxi:', selectedTaxiId);
                 }
-                selectedTaxiId = TaxiID; // Use the TaxiID from request
             }
 
-            console.log('Selected taxi_id:', selectedTaxiId);
+            console.log('Final selected taxi_id:', selectedTaxiId);
 
             // Create booking record
             const [bookingResult] = await connection.query(

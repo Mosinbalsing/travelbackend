@@ -1,7 +1,8 @@
 const { pool } = require("../config/db");
 const bcrypt = require("bcryptjs"); // ✅ Correct import
 const jwt = require("jsonwebtoken");
-const JWT_SECRET = "qwertyuiop";
+const JWT_SECRET = "qwertyuiop"; // Keep it consistent
+
 
 const registerUser = async (user) => {
   console.log(user);
@@ -50,11 +51,10 @@ const loginUser = async (email, password) => {
       return { success: false, message: "Invalid password" };
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-      expiresIn: "72h",
-    });
+    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET);
 
-    
+
+
 
     return { success: true, message: "Login successful", token };
   } catch (error) {
@@ -67,19 +67,20 @@ const loginUser = async (email, password) => {
   }
 };
 
+
+
 const getUserFromToken = async (token) => {
     try {
         if (!token) {
             throw new Error('No token provided');
         }
 
-        // Verify the token and handle expiration
+        // Verify the token using the correct JWT_SECRET
         let decoded;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET);
+            decoded = jwt.verify(token, JWT_SECRET);
         } catch (err) {
             if (err.name === 'TokenExpiredError') {
-                // Token has expired, return error object
                 return {
                     error: true,
                     message: 'Token has expired, please login again',
@@ -90,27 +91,18 @@ const getUserFromToken = async (token) => {
         }
 
         // Get user from database
-        const [users] = await pool.query(
-            'SELECT * FROM users WHERE id = ?',
-            [decoded.id]
-        );
+        const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [decoded.id]);
 
         if (users.length === 0) {
             throw new Error('User not found');
         }
 
-        return {
-            error: false,
-            user: users[0]
-        };
+        return { error: false, user: users[0] };
     } catch (error) {
         console.error('Error in getUserFromToken:', error);
-        return {
-            error: true,
-            message: error.message,
-            status: 500
-        };
+        return { error: true, message: error.message, status: 500 };
     }
 };
+
 
 module.exports = { registerUser, loginUser, getUserFromToken }; // ✅ Correct export

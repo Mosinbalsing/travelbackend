@@ -54,6 +54,7 @@ const loginUser = async (email, password) => {
       expiresIn: "72h",
     });
 
+    
     return { success: true, message: "Login successful", token };
   } catch (error) {
     console.error("Login error:", error);

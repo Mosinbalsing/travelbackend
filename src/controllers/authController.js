@@ -1,5 +1,6 @@
 const { registerUser,loginUser,getUserFromToken } = require("../services/userService");
 const { UserModel } = require("../models/userModel"); // ✅ Import UserModel
+const { User } = require("../models/userModel"); // ✅ Import User model
 
 const register = async (req, res) => {
     const { username, name, email, mobile, password } = req.body;
@@ -78,4 +79,38 @@ const getUserFromTokencontroller = async (req, res) => {
     }
 };
 
-module.exports = { register , login , getUserFromTokencontroller };
+const getUserByMobile = async (req, res) => {
+    try {
+        const { mobile } = req.params;
+        
+        // Input validation
+        if (!mobile) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Mobile number is required' 
+            });
+        }
+
+        const user = await User.findOne({ where: { mobile } });
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: user
+        });
+    } catch (error) {
+        console.error('Error in getUserByMobile:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Internal server error'
+        });
+    }
+};
+
+module.exports = { register , login , getUserFromTokencontroller, getUserByMobile };

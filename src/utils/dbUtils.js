@@ -1,4 +1,5 @@
 const { pool } = require("../config/db");
+const bcrypt = require('bcrypt');
 
 const createTablesIfNotExist = async () => {
   const connection = await pool.getConnection();
@@ -93,6 +94,7 @@ const createTablesIfNotExist = async () => {
 const initializeDatabase = async () => {
   try {
     await createTablesIfNotExist();
+    await createAdminTable();
     console.log("✅ Database initialization completed!");
   } catch (error) {
     console.error("❌ Database initialization failed:", error);
@@ -101,4 +103,49 @@ const initializeDatabase = async () => {
   }
 };
 
-module.exports = { createTablesIfNotExist, initializeDatabase };
+// Add this function to create Admin table
+const createAdminTable = async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS Admin (
+                admin_id INT PRIMARY KEY AUTO_INCREMENT,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                mobile VARCHAR(15) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log("Admin table created successfully");
+
+        // Insert default admin if not exists
+        const defaultAdmin = {
+            email: 'rahul@gmail.com',
+            password: 'Admin123',
+            mobile: '9021710342'
+        };
+
+        // Check if admin exists
+        const [existing] = await pool.query('SELECT * FROM Admin WHERE email = ?', [defaultAdmin.email]);
+        
+        if (existing.length === 0) {
+            // Hash the password before storing
+            const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
+            
+            // Insert the admin record
+            await pool.query(
+                'INSERT INTO Admin (email, password, mobile) VALUES (?, ?, ?)',
+                [defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
+            );
+            console.log('Default admin account created successfully');
+        }
+    } catch (error) {
+        console.error("Error in admin table operations:", error);
+        throw error;
+    }
+};
+
+module.exports = { 
+    createTablesIfNotExist, 
+    initializeDatabase,
+    createAdminTable 
+};

@@ -4,6 +4,10 @@ const { initializeDatabase } = require('./utils/dbUtils.js');
 const authRoutes = require('./routes/authRoutes');
 const cors = require("cors");
 const bookingRoutes = require('./routes/bookingRoutes');
+const { cleanupExpiredBookings, handleExpiredBookings } = require('./services/taxiService');
+const { createBooking } = require('./services/bookingService');
+const taxiRoutes = require('./routes/taxiRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -28,7 +32,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/auth', bookingRoutes);
+app.use('/api/booking', bookingRoutes);
+app.use('/api', taxiRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Initialize database tables
 (async () => {
@@ -40,6 +46,14 @@ app.use('/api/auth', bookingRoutes);
     process.exit(1);
   }
 })();
+
+// Run cleanup every day at midnight
+setInterval(async () => {
+    const now = new Date();
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+        await handleExpiredBookings();
+    }
+}, 60000); // Check every minute
 
 app.listen(3000, async () => {
   console.log('Server running on port 3000');

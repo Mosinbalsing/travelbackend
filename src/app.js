@@ -13,7 +13,7 @@ const app = express();
 
 // Configure CORS with options
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://shreetourstraveling.vercel.app','https://shreetoursandtravels.netlify.app','*','https://shreetravlsandtours.vercel.app','https://shreetraveling.vercel.app'],
+  origin: ['https://travel.galaxyfabrications.com/','http://localhost:5173', 'https://shreetourstraveling.vercel.app','https://shreetoursandtravels.netlify.app','*','https://shreetravlsandtours.vercel.app','https://shreetraveling.vercel.app'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   exposedHeaders: ['Access-Control-Allow-Origin'],

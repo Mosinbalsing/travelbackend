@@ -28,6 +28,26 @@ const createBooking = async (bookingData) => {
     try {
         await createBookingTable();
 
+        // Validate vehicle type
+        const validVehicleTypes = ['Sedan', 'Hatchback', 'SUV', 'Prime_SUV'];
+        if (!validVehicleTypes.includes(bookingData.vehicleType)) {
+            console.log('Invalid vehicle type:', bookingData.vehicleType);
+            return {
+                success: false,
+                message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(', ')}`
+            };
+        }
+
+        // Validate travel date
+        const travelDate = new Date(bookingData.travelDate);
+        const today = new Date();
+        if (travelDate < today) {
+            return {
+                success: false,
+                message: "Travel date cannot be in the past"
+            };
+        }
+
         const [user] = await pool.query(
             'SELECT user_id FROM User WHERE mobile = ?',
             [bookingData.userDetails.mobile]
@@ -47,41 +67,46 @@ const createBooking = async (bookingData) => {
         await pool.query('START TRANSACTION');
 
         try {
-            // 1. Check if vehicle is available for specific route
             let checkColumn;
             switch (bookingData.vehicleType) {
-                case 'Sedan':
-                    checkColumn = 'Sedan_Available';
-                    break;
-                case 'Hatchback':
-                    checkColumn = 'Hatchback_Available';
-                    break;
-                case 'SUV':
-                    checkColumn = 'SUV_Available';
-                    break;
-                case 'Prime_SUV':
-                    checkColumn = 'Prime_SUV_Available';
-                    break;
-                default:
-                    throw new Error('Invalid vehicle type');
+                case 'Sedan': checkColumn = 'Sedan_Available'; break;
+                case 'Hatchback': checkColumn = 'Hatchback_Available'; break;
+                case 'SUV': checkColumn = 'SUV_Available'; break;
+                case 'Prime_SUV': checkColumn = 'Prime_SUV_Available'; break;
+                default: throw new Error('Invalid vehicle type');
             }
 
-            // Check availability for specific route
+            // Check availability considering existing bookings for the travel date
             const [availability] = await pool.query(
-                `SELECT ${checkColumn} FROM AvailableTaxis 
-                 WHERE PickupLocation = ? AND DropLocation = ? AND ${checkColumn} > 0`,
-                [bookingData.pickupLocation, bookingData.dropLocation]
+                `SELECT a.*, 
+                    COALESCE(b.booked_count, 0) as booked_count
+                FROM AvailableTaxis a
+                LEFT JOIN (
+                    SELECT COUNT(*) as booked_count
+                    FROM BookingTaxis
+                    WHERE vehicle_type = ?
+                    AND travel_date = ?
+                    AND status = 'confirmed'
+                ) b ON 1=1
+                WHERE a.${checkColumn} > COALESCE(b.booked_count, 0)`,
+                [bookingData.vehicleType, bookingData.travelDate]
             );
+
+            console.log('Availability check:', {
+                vehicleType: bookingData.vehicleType,
+                travelDate: bookingData.travelDate,
+                availabilityData: availability[0]
+            });
 
             if (!availability || availability.length === 0) {
                 await pool.query('ROLLBACK');
                 return {
                     success: false,
-                    message: "No vehicles available for this route"
+                    message: "No vehicles available for this date"
                 };
             }
 
-            // 2. Insert booking details
+            // Insert booking
             const [result] = await pool.query(
                 `INSERT INTO BookingTaxis (
                     booking_date,
@@ -90,55 +115,40 @@ const createBooking = async (bookingData) => {
                     number_of_passengers,
                     pickup_location,
                     drop_location,
-                    user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    user_id,
+                    status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
                 [
                     currentDateTime,
                     bookingData.travelDate,
                     bookingData.vehicleType,
-                    bookingData.numberOfPassengers,
+                    bookingData.numberOfPassengers || 1,
                     bookingData.pickupLocation,
                     bookingData.dropLocation,
                     userId
                 ]
             );
 
-            // 3. Update AvailableTaxis (decrease count) for specific route only
-            const [updateResult] = await pool.query(
-                `UPDATE AvailableTaxis 
-                 SET ${checkColumn} = ${checkColumn} - 1 
-                 WHERE PickupLocation = ? 
-                 AND DropLocation = ? 
-                 AND ${checkColumn} > 0`,
-                [bookingData.pickupLocation, bookingData.dropLocation]
-            );
-
-            if (updateResult.affectedRows === 0) {
-                await pool.query('ROLLBACK');
-                return {
-                    success: false,
-                    message: "Failed to update vehicle availability"
-                };
-            }
-
-            // Commit the transaction
             await pool.query('COMMIT');
 
-            // 4. Schedule restoration after 5 minutes for specific route only
+            // Schedule restoration for the specific date
+            const restorationTime = new Date(bookingData.travelDate);
+            restorationTime.setHours(23, 59, 59); // End of the travel date
+
+            const now = new Date();
+            const delayMs = restorationTime.getTime() - now.getTime();
+
             setTimeout(async () => {
                 try {
-                    await pool.query(
-                        `UPDATE AvailableTaxis 
-                         SET ${checkColumn} = ${checkColumn} + 1 
-                         WHERE PickupLocation = ? 
-                         AND DropLocation = ?`,
-                        [bookingData.pickupLocation, bookingData.dropLocation]
+                    await restoreAvailability(
+                        bookingData.vehicleType,
+                        bookingData.travelDate
                     );
-                    console.log(`Restored availability for ${bookingData.vehicleType} on route ${bookingData.pickupLocation} to ${bookingData.dropLocation}`);
+                    console.log(`Restored availability for booking ${result.insertId} after travel date`);
                 } catch (error) {
-                    console.error('Error restoring availability:', error);
+                    console.error('Error in scheduled restoration:', error);
                 }
-            }, 5 * 60); // 5 minutes
+            }, delayMs);
 
             return {
                 success: true,
@@ -168,56 +178,83 @@ const createBooking = async (bookingData) => {
     }
 };
 
-// Also update the restoreAvailability function to handle specific routes
-const restoreAvailability = async (vehicleType, pickupLocation, dropLocation) => {
+// Update restore availability function to work with dates
+const restoreAvailability = async (vehicleType, travelDate) => {
     try {
         let updateColumn;
         switch (vehicleType) {
-            case 'Sedan':
-                updateColumn = 'Sedan_Available';
-                break;
-            case 'Hatchback':
-                updateColumn = 'Hatchback_Available';
-                break;
-            case 'SUV':
-                updateColumn = 'SUV_Available';
-                break;
-            case 'Prime_SUV':
-                updateColumn = 'Prime_SUV_Available';
-                break;
-            default:
-                throw new Error('Invalid vehicle type');
+            case 'Sedan': updateColumn = 'Sedan_Available'; break;
+            case 'Hatchback': updateColumn = 'Hatchback_Available'; break;
+            case 'SUV': updateColumn = 'SUV_Available'; break;
+            case 'Prime_SUV': updateColumn = 'Prime_SUV_Available'; break;
+            default: throw new Error('Invalid vehicle type');
         }
 
+        // Update booking status first
         await pool.query(
-            `UPDATE AvailableTaxis 
-             SET ${updateColumn} = ${updateColumn} + 1
-             WHERE PickupLocation = ? 
-             AND DropLocation = ?`,
-            [pickupLocation, dropLocation]
+            `UPDATE BookingTaxis 
+             SET status = 'completed'
+             WHERE vehicle_type = ?
+             AND travel_date = ?
+             AND status = 'confirmed'`,
+            [vehicleType, travelDate]
         );
 
-        console.log(`Restored availability for ${vehicleType} on route ${pickupLocation} to ${dropLocation}`);
+        console.log(`Restored availability for ${vehicleType} on ${travelDate}`);
+        return true;
     } catch (error) {
         console.error('Error restoring availability:', error);
         throw error;
     }
 };
 
-// Add a function to handle expired bookings
+// Add a function to get current availability
+const getCurrentAvailability = async (vehicleType, travelDate) => {
+    try {
+        let checkColumn;
+        switch (vehicleType) {
+            case 'Sedan': checkColumn = 'Sedan_Available'; break;
+            case 'Hatchback': checkColumn = 'Hatchback_Available'; break;
+            case 'SUV': checkColumn = 'SUV_Available'; break;
+            case 'Prime_SUV': checkColumn = 'Prime_SUV_Available'; break;
+            default: throw new Error('Invalid vehicle type');
+        }
+
+        const [result] = await pool.query(
+            `SELECT a.${checkColumn} - COALESCE(b.booked_count, 0) as available
+             FROM AvailableTaxis a
+             LEFT JOIN (
+                 SELECT COUNT(*) as booked_count
+                 FROM BookingTaxis
+                 WHERE vehicle_type = ?
+                 AND travel_date = ?
+                 AND status = 'confirmed'
+             ) b ON 1=1`,
+            [vehicleType, travelDate]
+        );
+
+        return result[0]?.available || 0;
+    } catch (error) {
+        console.error('Error getting availability:', error);
+        throw error;
+    }
+};
+
+// Update the handle expired bookings function
 const handleExpiredBookings = async () => {
     try {
-        // Get expired bookings
+        // Get expired bookings grouped by vehicle type
         const [expiredBookings] = await pool.query(`
-            SELECT vehicle_type 
+            SELECT vehicle_type, COUNT(*) as count
             FROM BookingTaxis 
             WHERE travel_date < CURDATE() 
             AND status = 'confirmed'
+            GROUP BY vehicle_type
         `);
 
-        // Restore availability for each expired booking
+        // Restore availability for each vehicle type
         for (const booking of expiredBookings) {
-            await restoreAvailability(booking.vehicle_type, booking.pickup_location, booking.drop_location);
+            await restoreAvailability(booking.vehicle_type, booking.travel_date);
         }
 
         // Update status of expired bookings
@@ -233,9 +270,34 @@ const handleExpiredBookings = async () => {
     }
 };
 
+// Update the pending restorations handler
+const handlePendingRestorations = async () => {
+    try {
+        const [pendingBookings] = await pool.query(`
+            SELECT booking_id, vehicle_type
+            FROM BookingTaxis
+            WHERE status = 'confirmed'
+            AND booking_date >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+            GROUP BY vehicle_type
+        `);
+
+        for (const booking of pendingBookings) {
+            await restoreAvailability(booking.vehicle_type, booking.travel_date);
+            console.log(`Restored availability for pending bookings of type ${booking.vehicle_type}`);
+        }
+    } catch (error) {
+        console.error('Error handling pending restorations:', error);
+    }
+};
+
+// Call this when your server starts
+handlePendingRestorations();
+
 // Update module exports
 module.exports = { 
     createBooking,
     handleExpiredBookings,
-    restoreAvailability 
+    restoreAvailability,
+    handlePendingRestorations,
+    getCurrentAvailability
 }; 

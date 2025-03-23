@@ -392,5 +392,5 @@ module.exports = {
     cleanupExpiredBookings,
     insertInitialTaxiInventory,
     createBookingTaxisTable,
-    updateAllTaxiInventory 
+    updateAllTaxiInventory
 };

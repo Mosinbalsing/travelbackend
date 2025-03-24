@@ -2,7 +2,17 @@ const { pool } = require("../config/db");
 
 const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
     try {
+        // Create tables in correct order
+        await createUserTable();
         await createTaxiInventoryTable();
+        await createPastBookingsTable();
+        
+        // Drop and recreate BookingTaxis table to ensure correct structure
+        await dropBookingTaxisTable();
+        await createBookingTaxisTable();
+
+        // Handle past bookings
+        await handlePastBookings();
 
         if (!pickupLocation || !dropLocation || !date) {
             return {
@@ -273,20 +283,26 @@ const createTaxiInventoryTable = async () => {
 
 const createBookingTaxisTable = async () => {
     try {
+        // First drop the existing table if it exists
+        await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+        
+        // Create the table with the correct structure
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS BookingTaxis (
+            CREATE TABLE BookingTaxis (
                 booking_id INT PRIMARY KEY AUTO_INCREMENT,
+                booking_date DATETIME,
+                travel_date DATE,
+                vehicle_type VARCHAR(50),
+                number_of_passengers INT,
                 pickup_location VARCHAR(100),
                 drop_location VARCHAR(100),
-                vehicle_type VARCHAR(50),
-                travel_date DATE,
                 user_id INT,
-                booking_date DATETIME DEFAULT CURRENT_TIMESTAMP,
                 status VARCHAR(20) DEFAULT 'confirmed',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES User(user_id)
             )
         `);
-        console.log("BookingTaxis table created successfully");
+        console.log("BookingTaxis table created successfully with correct structure");
     } catch (error) {
         console.error("Error creating BookingTaxis table:", error);
         throw error;
@@ -385,6 +401,171 @@ const updateAllTaxiInventory = async () => {
     }
 };
 
+const createUserTable = async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS User (
+                user_id INT PRIMARY KEY AUTO_INCREMENT,
+                name VARCHAR(100),
+                email VARCHAR(100),
+                mobile VARCHAR(15),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        console.log("User table created successfully");
+    } catch (error) {
+        console.error("Error creating User table:", error);
+        throw error;
+    }
+};
+
+const dropBookingTaxisTable = async () => {
+    try {
+        await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+        console.log("BookingTaxis table dropped successfully");
+    } catch (error) {
+        console.error("Error dropping BookingTaxis table:", error);
+        throw error;
+    }
+};
+
+const createPastBookingsTable = async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS PastBookings (
+                booking_id INT PRIMARY KEY AUTO_INCREMENT,
+                booking_date DATETIME,
+                travel_date DATE,
+                vehicle_type VARCHAR(50),
+                number_of_passengers INT,
+                pickup_location VARCHAR(100),
+                drop_location VARCHAR(100),
+                user_id INT,
+                status VARCHAR(20),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES User(user_id)
+            )
+        `);
+        console.log("PastBookings table created successfully");
+    } catch (error) {
+        console.error("Error creating PastBookings table:", error);
+        throw error;
+    }
+};
+
+const decrementAvailableTaxis = async (vehicleType, pickupLocation, dropLocation, travelDate) => {
+    try {
+        let updateColumn;
+        switch (vehicleType) {
+            case 'Sedan': updateColumn = 'Sedan_Available'; break;
+            case 'Hatchback': updateColumn = 'Hatchback_Available'; break;
+            case 'SUV': updateColumn = 'SUV_Available'; break;
+            case 'Prime_SUV': updateColumn = 'Prime_SUV_Available'; break;
+            default: throw new Error('Invalid vehicle type');
+        }
+
+        await pool.query(`
+            UPDATE AvailableTaxis 
+            SET ${updateColumn} = ${updateColumn} - 1
+            WHERE PickupLocation = ? 
+            AND DropLocation = ?
+        `, [pickupLocation, dropLocation]);
+
+        // Schedule restoration after 5 minutes
+        setTimeout(async () => {
+            try {
+                await incrementAvailableTaxis(vehicleType, pickupLocation, dropLocation);
+                console.log(`Restored availability for ${vehicleType} after 5 minutes`);
+            } catch (error) {
+                console.error('Error in scheduled restoration:', error);
+            }
+        }, 5 * 60 * 1000); // 5 minutes in milliseconds
+
+        return true;
+    } catch (error) {
+        console.error("Error decrementing available taxis:", error);
+        throw error;
+    }
+};
+
+const incrementAvailableTaxis = async (vehicleType, pickupLocation, dropLocation) => {
+    try {
+        let updateColumn;
+        switch (vehicleType) {
+            case 'Sedan': updateColumn = 'Sedan_Available'; break;
+            case 'Hatchback': updateColumn = 'Hatchback_Available'; break;
+            case 'SUV': updateColumn = 'SUV_Available'; break;
+            case 'Prime_SUV': updateColumn = 'Prime_SUV_Available'; break;
+            default: throw new Error('Invalid vehicle type');
+        }
+
+        await pool.query(`
+            UPDATE AvailableTaxis 
+            SET ${updateColumn} = ${updateColumn} + 1
+            WHERE PickupLocation = ? 
+            AND DropLocation = ?
+        `, [pickupLocation, dropLocation]);
+
+        return true;
+    } catch (error) {
+        console.error("Error incrementing available taxis:", error);
+        throw error;
+    }
+};
+
+const handlePastBookings = async () => {
+    try {
+        // Start transaction
+        await pool.query('START TRANSACTION');
+
+        try {
+            // Get past bookings
+            const [pastBookings] = await pool.query(`
+                SELECT * FROM BookingTaxis 
+                WHERE travel_date < CURDATE()
+            `);
+
+            if (pastBookings.length > 0) {
+                // Insert into PastBookings
+                for (const booking of pastBookings) {
+                    await pool.query(`
+                        INSERT INTO PastBookings (
+                            booking_date, travel_date, vehicle_type, 
+                            number_of_passengers, pickup_location, drop_location, 
+                            user_id, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    `, [
+                        booking.booking_date,
+                        booking.travel_date,
+                        booking.vehicle_type,
+                        booking.number_of_passengers,
+                        booking.pickup_location,
+                        booking.drop_location,
+                        booking.user_id,
+                        booking.status
+                    ]);
+                }
+
+                // Delete from BookingTaxis
+                await pool.query(`
+                    DELETE FROM BookingTaxis 
+                    WHERE travel_date < CURDATE()
+                `);
+
+                console.log(`Moved ${pastBookings.length} past bookings to PastBookings table`);
+            }
+
+            await pool.query('COMMIT');
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+    } catch (error) {
+        console.error("Error handling past bookings:", error);
+        throw error;
+    }
+};
+
 module.exports = { 
     getAvailableTaxis, 
     mobileexist, 
@@ -392,5 +573,11 @@ module.exports = {
     cleanupExpiredBookings,
     insertInitialTaxiInventory,
     createBookingTaxisTable,
-    updateAllTaxiInventory
+    updateAllTaxiInventory,
+    createUserTable,
+    dropBookingTaxisTable,
+    createPastBookingsTable,
+    decrementAvailableTaxis,
+    incrementAvailableTaxis,
+    handlePastBookings
 };

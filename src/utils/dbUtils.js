@@ -1,6 +1,16 @@
 const { pool } = require("../config/db");
 const bcrypt = require('bcrypt');
 
+const dropBookingsTable = async () => {
+    try {
+        await pool.query('DROP TABLE IF EXISTS BookedTaxis');
+        console.log("✅ Bookings table dropped successfully!");
+    } catch (error) {
+        console.error("❌ Error dropping bookings table:", error);
+        throw error;
+    }
+};
+
 const createTablesIfNotExist = async () => {
   const connection = await pool.getConnection();
   
@@ -12,7 +22,7 @@ const createTablesIfNotExist = async () => {
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = DATABASE()
-      AND table_name IN ('AvailableTaxis', 'bookings')
+      AND table_name IN ('AvailableTaxis')
     `);
 
     const existingTables = tables.map(t => t.TABLE_NAME);
@@ -47,35 +57,6 @@ const createTablesIfNotExist = async () => {
         ('Nashik', 'Mumbai', 5, 5, 5, 5),
         ('Pune', 'Nashik', 5, 5, 5, 5),
         ('Nashik', 'Pune', 5, 5, 5, 5)
-      `);
-    }
-
-    // Create bookings if it doesn't exist
-    if (!existingTables.includes('bookings')) {
-      console.log("Creating bookings table...");
-      await connection.query(`
-        CREATE TABLE bookings (
-            booking_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            user_id VARCHAR(255) NOT NULL,
-            taxi_id INT UNSIGNED,
-            booking_date DATETIME NOT NULL,
-            pickup_location VARCHAR(255) NOT NULL,
-            pickup_address TEXT NOT NULL,
-            pickup_city VARCHAR(255) NOT NULL,
-            pickup_pincode VARCHAR(10) NOT NULL,
-            drop_location VARCHAR(255) NOT NULL,
-            travel_date DATE NOT NULL,
-            pickup_time TIME NOT NULL,
-            vehicle_type ENUM('sedan', 'hatchback', 'suv', 'prime suv') NOT NULL,
-            number_of_passengers INT NOT NULL,
-            status VARCHAR(50) NOT NULL,
-            price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            INDEX idx_taxi_id (taxi_id),
-            CONSTRAINT fk_taxi FOREIGN KEY (taxi_id) 
-            REFERENCES AvailableTaxis(id) ON DELETE SET NULL ON UPDATE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
       `);
     }
 
@@ -147,5 +128,6 @@ const createAdminTable = async () => {
 module.exports = { 
     createTablesIfNotExist, 
     initializeDatabase,
-    createAdminTable 
+    createAdminTable,
+    dropBookingsTable
 };

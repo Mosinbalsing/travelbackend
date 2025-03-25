@@ -6,9 +6,6 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
         await createUserTable();
         await createTaxiInventoryTable();
         await createPastBookingsTable();
-        
-        // Drop and recreate BookingTaxis table to ensure correct structure
-        await dropBookingTaxisTable();
         await createBookingTaxisTable();
 
         // Handle past bookings
@@ -50,40 +47,48 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 t.*,
                 (t.Sedan_Available - COALESCE(
                     (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE pickup_location = t.PickupLocation 
-                    AND drop_location = t.DropLocation 
-                    AND vehicle_type = 'Sedan' 
+                    WHERE vehicle_type = 'Sedan' 
                     AND travel_date = ? 
                     AND status = 'confirmed'), 0
                 )) as actual_sedan_available,
                 (t.Hatchback_Available - COALESCE(
                     (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE pickup_location = t.PickupLocation 
-                    AND drop_location = t.DropLocation 
-                    AND vehicle_type = 'Hatchback' 
+                    WHERE vehicle_type = 'Hatchback' 
                     AND travel_date = ? 
                     AND status = 'confirmed'), 0
                 )) as actual_hatchback_available,
                 (t.SUV_Available - COALESCE(
                     (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE pickup_location = t.PickupLocation 
-                    AND drop_location = t.DropLocation 
-                    AND vehicle_type = 'SUV' 
+                    WHERE vehicle_type = 'SUV' 
                     AND travel_date = ? 
                     AND status = 'confirmed'), 0
                 )) as actual_suv_available,
                 (t.Prime_SUV_Available - COALESCE(
                     (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE pickup_location = t.PickupLocation 
-                    AND drop_location = t.DropLocation 
-                    AND vehicle_type = 'Prime_SUV' 
+                    WHERE vehicle_type = 'Prime_SUV' 
                     AND travel_date = ? 
                     AND status = 'confirmed'), 0
-                )) as actual_prime_suv_available
+                )) as actual_prime_suv_available,
+                (SELECT COUNT(*) FROM BookingTaxis 
+                WHERE vehicle_type = 'Sedan' 
+                AND travel_date = ? 
+                AND status = 'confirmed') as sedan_booked_count,
+                (SELECT COUNT(*) FROM BookingTaxis 
+                WHERE vehicle_type = 'Hatchback' 
+                AND travel_date = ? 
+                AND status = 'confirmed') as hatchback_booked_count,
+                (SELECT COUNT(*) FROM BookingTaxis 
+                WHERE vehicle_type = 'SUV' 
+                AND travel_date = ? 
+                AND status = 'confirmed') as suv_booked_count,
+                (SELECT COUNT(*) FROM BookingTaxis 
+                WHERE vehicle_type = 'Prime_SUV' 
+                AND travel_date = ? 
+                AND status = 'confirmed') as prime_suv_booked_count
             FROM AvailableTaxis t
             WHERE t.PickupLocation = ? 
             AND t.DropLocation = ?
-        `, [date, date, date, date, pickupLocation, dropLocation]);
+        `, [date, date, date, date, date, date, date, date, pickupLocation, dropLocation]);
 
         if (rows.length === 0) {
             return {
@@ -119,41 +124,48 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
             }
         });
 
-        // Add vehicles with explicit number conversion and debug logs
-        const sedanAvailable = Math.max(0, Number(row.Sedan_Available) - Number(row.sedan_booked || 0));
-        if (sedanAvailable > 0) {
-            console.log('Adding Sedan with count:', sedanAvailable);
+        // Add vehicles with actual available counts
+        if (row.actual_sedan_available > 0) {
             availableVehicles.push({
                 type: 'Sedan',
                 price: Number(row.Sedan_Price),
-                availableCount: sedanAvailable
+                availableCount: row.actual_sedan_available,
+                totalCount: row.Sedan_Available,
+                bookedCount: row.sedan_booked_count,
+                message: `${row.actual_sedan_available} out of ${row.Sedan_Available} Sedans available`
             });
         }
 
-        const hatchbackAvailable = Math.max(0, Number(row.Hatchback_Available) - Number(row.hatchback_booked || 0));
-        if (hatchbackAvailable > 0) {
+        if (row.actual_hatchback_available > 0) {
             availableVehicles.push({
                 type: 'Hatchback',
                 price: Number(row.Hatchback_Price),
-                availableCount: hatchbackAvailable
+                availableCount: row.actual_hatchback_available,
+                totalCount: row.Hatchback_Available,
+                bookedCount: row.hatchback_booked_count,
+                message: `${row.actual_hatchback_available} out of ${row.Hatchback_Available} Hatchbacks available`
             });
         }
 
-        const suvAvailable = Math.max(0, Number(row.SUV_Available) - Number(row.suv_booked || 0));
-        if (suvAvailable > 0) {
+        if (row.actual_suv_available > 0) {
             availableVehicles.push({
                 type: 'SUV',
                 price: Number(row.SUV_Price),
-                availableCount: suvAvailable
+                availableCount: row.actual_suv_available,
+                totalCount: row.SUV_Available,
+                bookedCount: row.suv_booked_count,
+                message: `${row.actual_suv_available} out of ${row.SUV_Available} SUVs available`
             });
         }
 
-        const primeSuvAvailable = Math.max(0, Number(row.Prime_SUV_Available) - Number(row.prime_suv_booked || 0));
-        if (primeSuvAvailable > 0) {
+        if (row.actual_prime_suv_available > 0) {
             availableVehicles.push({
                 type: 'Prime_SUV',
                 price: Number(row.Prime_SUV_Price),
-                availableCount: primeSuvAvailable
+                availableCount: row.actual_prime_suv_available,
+                totalCount: row.Prime_SUV_Available,
+                bookedCount: row.prime_suv_booked_count,
+                message: `${row.actual_prime_suv_available} out of ${row.Prime_SUV_Available} Prime SUVs available`
             });
         }
 
@@ -167,7 +179,8 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 pickupLocation: row.PickupLocation,
                 dropLocation: row.DropLocation,
                 availableDate: date,
-                availableVehicles: availableVehicles
+                availableVehicles: availableVehicles,
+                currentBookings: bookings
             }
         };
     } catch (error) {
@@ -283,12 +296,9 @@ const createTaxiInventoryTable = async () => {
 
 const createBookingTaxisTable = async () => {
     try {
-        // First drop the existing table if it exists
-        await pool.query('DROP TABLE IF EXISTS BookingTaxis');
-        
-        // Create the table with the correct structure
+        // Create the table only if it doesn't exist
         await pool.query(`
-            CREATE TABLE BookingTaxis (
+            CREATE TABLE IF NOT EXISTS BookingTaxis (
                 booking_id INT PRIMARY KEY AUTO_INCREMENT,
                 booking_date DATETIME,
                 travel_date DATE,
@@ -302,7 +312,7 @@ const createBookingTaxisTable = async () => {
                 FOREIGN KEY (user_id) REFERENCES User(user_id)
             )
         `);
-        console.log("BookingTaxis table created successfully with correct structure");
+        console.log("BookingTaxis table checked/created successfully");
     } catch (error) {
         console.error("Error creating BookingTaxis table:", error);
         throw error;
@@ -366,8 +376,8 @@ const updateAllTaxiInventory = async () => {
             const [result] = await pool.query(`
                 UPDATE AvailableTaxis 
                 SET 
-                    Sedan_Available = 4,
-                    Hatchback_Available = 2,
+                    Sedan_Available = 2,
+                    Hatchback_Available = 4,
                     SUV_Available = 1,
                     Prime_SUV_Available = 1
             `);

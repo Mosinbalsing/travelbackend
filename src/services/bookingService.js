@@ -63,8 +63,8 @@ const createBooking = async (bookingData) => {
     // If booking is for today and current time is past 7 PM
     if (
       travelDate.toDateString() === today.toDateString() &&
-      (currentHour > 20 || (currentHour === 20 && currentMinutes > 0))
-    ) {
+      (currentHour > 22 || (currentHour === 22 && currentMinutes > 0))
+    ) { 
       return {
         success: false,
         message: "Cannot create bookings after 7 PM for today",
@@ -138,7 +138,28 @@ const createBooking = async (bookingData) => {
         await pool.query("ROLLBACK");
         return {
           success: false,
-          message: "No vehicles available for this date",
+          message: `No ${bookingData.vehicleType} vehicles available for this date. All vehicles are already booked.`,
+        };
+      }
+
+      // Double check the current booking count for this vehicle type and date
+      const [currentBookings] = await pool.query(
+        `SELECT COUNT(*) as booked_count
+         FROM BookingTaxis
+         WHERE vehicle_type = ?
+         AND travel_date = ?
+         AND status = 'confirmed'`,
+        [bookingData.vehicleType, bookingData.travelDate]
+      );
+
+      const bookedCount = currentBookings[0].booked_count;
+      const availableCount = availability[0][checkColumn];
+
+      if (bookedCount >= availableCount) {
+        await pool.query("ROLLBACK");
+        return {
+          success: false,
+          message: `Cannot book ${bookingData.vehicleType}. All ${availableCount} vehicles are already booked for this date.`,
         };
       }
 
@@ -165,124 +186,103 @@ const createBooking = async (bookingData) => {
         ]
       );
 
-      // Update TaxiAvailabilityByDate
-      await pool.query(
-        `INSERT INTO TaxiAvailabilityByDate 
-        (travel_date, vehicle_type, pickup_location, drop_location, available_count)
-        VALUES (?, ?, ?, ?, 1)
-        ON DUPLICATE KEY UPDATE 
-        available_count = available_count + 1`,
-        [
-          bookingData.travelDate,
-          bookingData.vehicleType,
-          bookingData.pickupLocation,
-          bookingData.dropLocation,
-        ]
-      );
-
       // Handle taxi count based on travel date
       if (travelDate.toDateString() === today.toDateString()) {
-        // For today's bookings, decrement immediately
+        // For today's bookings, decrement for all routes but ensure it doesn't go below 0
         await pool.query(
           `UPDATE AvailableTaxis 
-                    SET ${checkColumn} = ${checkColumn} - 1
-                    WHERE ${checkColumn} > 0
-                    AND PickupLocation = ?
-                    AND DropLocation = ?`,
-          [bookingData.pickupLocation, bookingData.dropLocation]
+                    SET ${checkColumn} = GREATEST(${checkColumn} - 1, 0)
+                    WHERE ${checkColumn} > 0`,
+          []
         );
 
-        // Schedule increment after 2 minutes
-        setTimeout(async () => {
-          try {
-            await pool.query(
-              `UPDATE AvailableTaxis 
-                            SET ${checkColumn} = ${checkColumn} + 1
-                            WHERE PickupLocation = ? 
-                            AND DropLocation = ?`,
-              [bookingData.pickupLocation, bookingData.dropLocation]
-            );
-            console.log(
-              `Incremented availability for booking ${result.insertId} after 2 minutes`
-            );
-          } catch (error) {
-            console.error("Error in scheduled increment:", error);
-          }
-        }, 2 * 60 * 1000); // 2 minutes in milliseconds
+        // Update TaxiAvailabilityByDate for today only
+        await pool.query(
+          `INSERT INTO TaxiAvailabilityByDate 
+          (travel_date, vehicle_type, available_count)
+          VALUES (?, ?, 1)
+          ON DUPLICATE KEY UPDATE 
+          available_count = available_count + 1`,
+          [bookingData.travelDate, bookingData.vehicleType]
+        );
+
+        // Schedule availability restoration after 2 minutes
+        const twoMinutesLater = new Date();
+        twoMinutesLater.setMinutes(twoMinutesLater.getMinutes() + 2);
+
+        // Store the restoration time in the database
+        await pool.query(
+          `INSERT INTO TaxiAvailabilityByDate 
+          (travel_date, vehicle_type, available_count, restoration_time)
+          VALUES (?, ?, 1, ?)
+          ON DUPLICATE KEY UPDATE 
+          restoration_time = ?`,
+          [bookingData.travelDate, bookingData.vehicleType, twoMinutesLater, twoMinutesLater]
+        );
       } else {
-        // For future dates, schedule the decrement for the travel date
-        const travelDateTime = new Date(bookingData.travelDate);
-        travelDateTime.setHours(0, 0, 0, 0); // Start of the travel date
-
-        const now = new Date();
-        const delayMs = travelDateTime.getTime() - now.getTime();
-
-        if (delayMs > 0) {
-          setTimeout(async () => {
-            try {
-              // Decrement at start of travel date for all routes
-              await pool.query(
-                `UPDATE AvailableTaxis 
-                                SET ${checkColumn} = ${checkColumn} - 1
-                                WHERE ${checkColumn} > 0`
-              );
-              console.log(
-                `Decremented availability for booking ${result.insertId} on travel date`
-              );
-
-              // Schedule increment after 2 minutes for all routes
-              setTimeout(async () => {
-                try {
-                  await pool.query(
-                    `UPDATE AvailableTaxis 
-                                        SET ${checkColumn} = ${checkColumn} + 1
-                                        WHERE ${checkColumn} < (
-                                            SELECT original_count 
-                                            FROM (
-                                                SELECT ${checkColumn} as original_count 
-                                                FROM AvailableTaxis 
-                                                WHERE PickupLocation = ? 
-                                                AND DropLocation = ?
-                                            ) as original
-                                        )`,
-                    [bookingData.pickupLocation, bookingData.dropLocation]
-                  );
-                  console.log(
-                    `Incremented availability for booking ${result.insertId} after 2 minutes`
-                  );
-                } catch (error) {
-                  console.error("Error in scheduled increment:", error);
-                }
-              }, 2 * 60 * 1000); // 2 minutes in milliseconds
-            } catch (error) {
-              console.error("Error in scheduled decrement:", error);
-            }
-          }, delayMs);
-        }
+        // For future dates, only update TaxiAvailabilityByDate for the specific date
+        await pool.query(
+          `INSERT INTO TaxiAvailabilityByDate 
+          (travel_date, vehicle_type, available_count)
+          VALUES (?, ?, 1)
+          ON DUPLICATE KEY UPDATE 
+          available_count = available_count + 1`,
+          [bookingData.travelDate, bookingData.vehicleType]
+        );
       }
 
       await pool.query("COMMIT");
 
-      // Schedule restoration for the specific date
+      // Schedule restoration for the end of the travel date
       const restorationTime = new Date(bookingData.travelDate);
       restorationTime.setHours(23, 59, 59); // End of the travel date
 
       const now = new Date();
       const delayMs = restorationTime.getTime() - now.getTime();
 
-      setTimeout(async () => {
-        try {
-          await restoreAvailability(
-            bookingData.vehicleType,
-            bookingData.travelDate
-          );
-          console.log(
-            `Restored availability for booking ${result.insertId} after travel date`
-          );
-        } catch (error) {
-          console.error("Error in scheduled restoration:", error);
-        }
-      }, delayMs);
+      if (delayMs > 0) {
+        setTimeout(async () => {
+          try {
+            // Restore availability at the end of the travel date, but don't exceed original count
+            await pool.query(
+              `UPDATE AvailableTaxis 
+               SET ${checkColumn} = LEAST(${checkColumn} + 1, (
+                   SELECT original_count 
+                   FROM (
+                       SELECT ${checkColumn} as original_count 
+                       FROM AvailableTaxis 
+                       LIMIT 1
+                   ) as original
+               ))
+               WHERE ${checkColumn} < (
+                   SELECT original_count 
+                   FROM (
+                       SELECT ${checkColumn} as original_count 
+                       FROM AvailableTaxis 
+                       LIMIT 1
+                   ) as original
+               )`,
+              []
+            );
+
+            // Update booking status only for the specific date
+            await pool.query(
+              `UPDATE BookingTaxis 
+               SET status = 'completed'
+               WHERE vehicle_type = ?
+               AND travel_date = ?
+               AND status = 'confirmed'`,
+              [bookingData.vehicleType, bookingData.travelDate]
+            );
+
+            console.log(
+              `Restored availability for booking ${result.insertId} after travel date`
+            );
+          } catch (error) {
+            console.error("Error in scheduled restoration:", error);
+          }
+        }, delayMs);
+      }
 
       return {
         success: true,
@@ -351,7 +351,7 @@ const restoreAvailability = async (vehicleType, travelDate) => {
   }
 };
 
-// Add a function to get current availability
+// Update the getCurrentAvailability function to check specific date
 const getCurrentAvailability = async (vehicleType, travelDate) => {
   try {
     let checkColumn;
@@ -397,25 +397,65 @@ const handleExpiredBookings = async () => {
   try {
     // Get expired bookings grouped by vehicle type
     const [expiredBookings] = await pool.query(`
-            SELECT vehicle_type, COUNT(*) as count
+            SELECT vehicle_type, travel_date, COUNT(*) as count
             FROM BookingTaxis 
             WHERE travel_date < CURDATE() 
             AND status = 'confirmed'
-            GROUP BY vehicle_type
+            GROUP BY vehicle_type, travel_date
         `);
 
-    // Restore availability for each vehicle type
+    // Restore availability for each vehicle type and date
     for (const booking of expiredBookings) {
-      await restoreAvailability(booking.vehicle_type, booking.travel_date);
-    }
+      let checkColumn;
+      switch (booking.vehicle_type) {
+        case "Sedan":
+          checkColumn = "Sedan_Available";
+          break;
+        case "Hatchback":
+          checkColumn = "Hatchback_Available";
+          break;
+        case "SUV":
+          checkColumn = "SUV_Available";
+          break;
+        case "Prime_SUV":
+          checkColumn = "Prime_SUV_Available";
+          break;
+      }
 
-    // Update status of expired bookings
-    await pool.query(`
-            UPDATE BookingTaxis 
-            SET status = 'completed' 
-            WHERE travel_date < CURDATE() 
-            AND status = 'confirmed'
-        `);
+      // Restore availability for all routes but don't exceed original count
+      await pool.query(
+        `UPDATE AvailableTaxis 
+         SET ${checkColumn} = LEAST(${checkColumn} + 1, (
+             SELECT original_count 
+             FROM (
+                 SELECT ${checkColumn} as original_count 
+                 FROM AvailableTaxis 
+                 LIMIT 1
+             ) as original
+         ))
+         WHERE ${checkColumn} < (
+             SELECT original_count 
+             FROM (
+                 SELECT ${checkColumn} as original_count 
+                 FROM AvailableTaxis 
+                 LIMIT 1
+             ) as original
+         )`,
+        []
+      );
+
+      // Update booking status
+      await pool.query(
+        `UPDATE BookingTaxis 
+         SET status = 'completed'
+         WHERE vehicle_type = ?
+         AND travel_date = ?
+         AND status = 'confirmed'`,
+        [booking.vehicle_type, booking.travel_date]
+      );
+
+      console.log(`Restored availability for ${booking.vehicle_type} on ${booking.travel_date}`);
+    }
   } catch (error) {
     console.error("Error handling expired bookings:", error);
   }
@@ -446,7 +486,7 @@ const handlePendingRestorations = async () => {
 // Call this when your server starts
 handlePendingRestorations();
 
-// Add a function to process future bookings
+// Update the processFutureBookings function to handle specific dates
 const processFutureBookings = async () => {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -476,32 +516,23 @@ const processFutureBookings = async () => {
           break;
       }
 
-      // Decrement available taxis
+      // Decrement available taxis for all routes but ensure it doesn't go below 0
       await pool.query(
         `UPDATE AvailableTaxis 
-         SET ${checkColumn} = ${checkColumn} - 1
-         WHERE PickupLocation = ? 
-         AND DropLocation = ?`,
-        [booking.pickup_location, booking.drop_location]
+         SET ${checkColumn} = GREATEST(${checkColumn} - 1, 0)
+         WHERE ${checkColumn} > 0`,
+        []
       );
 
-      // Schedule increment after 2 minutes
-      setTimeout(async () => {
-        try {
-          await pool.query(
-            `UPDATE AvailableTaxis 
-             SET ${checkColumn} = ${checkColumn} + 1
-             WHERE PickupLocation = ? 
-             AND DropLocation = ?`,
-            [booking.pickup_location, booking.drop_location]
-          );
-          console.log(
-            `Incremented availability for booking ${booking.booking_id} after 2 minutes`
-          );
-        } catch (error) {
-          console.error("Error in scheduled increment:", error);
-        }
-      }, 2 * 60 * 1000); // 2 minutes in milliseconds
+      // Update TaxiAvailabilityByDate for the specific date only
+      await pool.query(
+        `INSERT INTO TaxiAvailabilityByDate 
+         (travel_date, vehicle_type, available_count)
+         VALUES (?, ?, 1)
+         ON DUPLICATE KEY UPDATE 
+         available_count = available_count + 1`,
+        [today, booking.vehicle_type]
+      );
     }
   } catch (error) {
     console.error("Error processing future bookings:", error);
@@ -511,6 +542,169 @@ const processFutureBookings = async () => {
 // Call processFutureBookings every hour
 setInterval(processFutureBookings, 60 * 60 * 1000);
 
+// Add new function to clear table data
+const clearTableData = async () => {
+  try {
+    // Start a transaction
+    await pool.query("START TRANSACTION");
+
+    try {
+      // Clear BookingTaxis table data
+      await pool.query("TRUNCATE TABLE TaxiAvailabilityByDate");
+      
+      // Clear TaxiAvailabilityByDate table data
+      await pool.query("TRUNCATE TABLE TaxiAvailabilityByDate");
+
+      await pool.query("COMMIT");
+
+      return {
+        success: true,
+        message: "All table data cleared successfully while preserving structure"
+      };
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
+  } catch (error) {
+    console.error("Error clearing table data:", error);
+    return {
+      success: false,
+      message: "Failed to clear table data",
+      error: error.message
+    };
+  }
+};
+
+// Update the checkVehicleAvailability function
+const checkVehicleAvailability = async (vehicleType, travelDate) => {
+  try {
+    let checkColumn;
+    switch (vehicleType) {
+      case "Sedan":
+        checkColumn = "Sedan_Available";
+        break;
+      case "Hatchback":
+        checkColumn = "Hatchback_Available";
+        break;
+      case "SUV":
+        checkColumn = "SUV_Available";
+        break;
+      case "Prime_SUV":
+        checkColumn = "Prime_SUV_Available";
+        break;
+      default:
+        throw new Error("Invalid vehicle type");
+    }
+
+    // Check if vehicle is available for the specific date
+    const [availability] = await pool.query(
+      `SELECT 
+        a.${checkColumn} as total_count,
+        COALESCE(b.booked_count, 0) as booked_count,
+        COALESCE(t.restoration_time, NULL) as restoration_time
+      FROM AvailableTaxis a
+      LEFT JOIN (
+        SELECT COUNT(*) as booked_count
+        FROM BookingTaxis
+        WHERE vehicle_type = ?
+        AND travel_date = ?
+        AND status = 'confirmed'
+      ) b ON 1=1
+      LEFT JOIN TaxiAvailabilityByDate t ON t.vehicle_type = ?
+      AND t.travel_date = ?`,
+      [vehicleType, travelDate, vehicleType, travelDate]
+    );
+
+    if (!availability || availability.length === 0) {
+      return {
+        available: false,
+        message: "No vehicles available"
+      };
+    }
+
+    const totalCount = availability[0].total_count;
+    const bookedCount = availability[0].booked_count;
+    const restorationTime = availability[0].restoration_time;
+
+    // If all vehicles are booked for this date
+    if (bookedCount >= totalCount) {
+      return {
+        available: false,
+        message: `All ${totalCount} vehicles are booked for ${travelDate}. Vehicle is not available for any route on this date.`
+      };
+    }
+
+    // If vehicle is temporarily unavailable (within 2-minute window)
+    if (restorationTime && new Date(restorationTime) > new Date()) {
+      return {
+        available: false,
+        message: "Vehicle is temporarily unavailable",
+        nextAvailable: restorationTime
+      };
+    }
+
+    return {
+      available: true,
+      message: `${totalCount - bookedCount} vehicles available`,
+      totalCount,
+      bookedCount
+    };
+  } catch (error) {
+    console.error("Error checking vehicle availability:", error);
+    throw error;
+  }
+};
+
+// Update the getAvailableTaxis function
+const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
+  try {
+    const vehicleTypes = ["Sedan", "Hatchback", "SUV", "Prime_SUV"];
+    const availableVehicles = [];
+
+    for (const vehicleType of vehicleTypes) {
+      const availability = await checkVehicleAvailability(vehicleType, date);
+      
+      if (availability.available) {
+        availableVehicles.push({
+          type: vehicleType,
+          availableCount: availability.totalCount - availability.bookedCount,
+          totalCount: availability.totalCount,
+          bookedCount: availability.bookedCount,
+          message: availability.message
+        });
+      } else {
+        // Add unavailable vehicles with their status
+        availableVehicles.push({
+          type: vehicleType,
+          availableCount: 0,
+          totalCount: availability.totalCount || 0,
+          bookedCount: availability.bookedCount || 0,
+          message: availability.message,
+          available: false
+        });
+      }
+    }
+
+    return {
+      success: true,
+      message: "Vehicle availability retrieved successfully",
+      data: {
+        pickupLocation,
+        dropLocation,
+        date,
+        availableVehicles
+      }
+    };
+  } catch (error) {
+    console.error("Error getting available taxis:", error);
+    return {
+      success: false,
+      message: "Failed to get available taxis",
+      error: error.message
+    };
+  }
+};
+
 // Update module exports
 module.exports = {
   createBooking,
@@ -518,5 +712,8 @@ module.exports = {
   restoreAvailability,
   handlePendingRestorations,
   getCurrentAvailability,
-  processFutureBookings
+  processFutureBookings,
+  clearTableData,
+  checkVehicleAvailability,
+  getAvailableTaxis
 };

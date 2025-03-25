@@ -32,8 +32,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/booking', bookingRoutes);
-app.use('/api', taxiRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/taxi', taxiRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Initialize database tables

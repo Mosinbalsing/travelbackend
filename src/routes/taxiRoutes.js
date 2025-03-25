@@ -16,4 +16,31 @@ router.post('/update-taxi-inventory', async (req, res) => {
     }
 });
 
+// Add new route to reset taxi availability
+router.post("/reset-availability", async (req, res) => {
+  try {
+    const result = await updateAllTaxiInventory();
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: "Taxi availability reset successfully",
+        data: result
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: "Failed to reset taxi availability",
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("Error in reset-availability route:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+});
+
 module.exports = router; 

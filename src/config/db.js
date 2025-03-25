@@ -3,13 +3,25 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-// Using the direct connection URL
-const pool = mysql2.createPool('mysql://root:pXIyoajJDzLIWPFLEcPyBxYvcGphKMgn@monorail.proxy.rlwy.net:56376/railway');
+// Configure the connection pool with proper timeout settings
+const pool = mysql2.createPool({
+    uri: 'mysql://root:pXIyoajJDzLIWPFLEcPyBxYvcGphKMgn@monorail.proxy.rlwy.net:56376/railway',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 60000, // 60 seconds
+    acquireTimeout: 60000, // 60 seconds
+    timeout: 60000, // 60 seconds
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0
+});
 
 const checkConnection = async () => {
     try {
-        // Add retry logic
+        // Add retry logic with exponential backoff
         let retries = 3;
+        let delay = 5000; // Start with 5 seconds delay
+        
         while (retries > 0) {
             try {
                 const connection = await pool.getConnection();
@@ -20,7 +32,8 @@ const checkConnection = async () => {
                 retries--;
                 if (retries === 0) throw error;
                 console.log(`Connection attempt failed. Retrying... (${retries} attempts left)`);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retry
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // Exponential backoff
             }
         }
     } catch (error) {

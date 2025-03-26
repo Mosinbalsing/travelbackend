@@ -2,7 +2,7 @@ const { pool } = require("../config/db");
 
 const createBookingTable = async () => {
   try {
-    // Create BookingTaxis table
+    // Create BookingTaxis table with initial booking_id set to 1001
     await pool.query(`
             CREATE TABLE IF NOT EXISTS BookingTaxis (
                 booking_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -18,6 +18,12 @@ const createBookingTable = async () => {
                 FOREIGN KEY (user_id) REFERENCES User(user_id)
             )
         `);
+
+    // Set the initial booking_id to 1001 if the table is empty
+    const [count] = await pool.query('SELECT COUNT(*) as count FROM BookingTaxis');
+    if (count[0].count === 0) {
+      await pool.query('ALTER TABLE BookingTaxis AUTO_INCREMENT = 1001');
+    }
 
     // Create TaxiAvailabilityByDate table
     await pool.query(`
@@ -43,7 +49,8 @@ const createBookingTable = async () => {
 const createBooking = async (bookingData) => {
   try {
     await createBookingTable();
-
+    console.log("Booking table checked/created successfully", bookingData);
+    
     // Validate vehicle type
     const validVehicleTypes = ["Sedan", "Hatchback", "SUV", "Prime_SUV"];
     if (!validVehicleTypes.includes(bookingData.vehicleType)) {
@@ -288,7 +295,7 @@ const createBooking = async (bookingData) => {
         success: true,
         message: "Booking created successfully",
         data: {
-          booking_id: result.insertId,
+          bookingId: result.insertId,
           bookingDate: currentDateTime,
           travelDate: bookingData.travelDate,
           vehicleType: bookingData.vehicleType,
@@ -550,7 +557,7 @@ const clearTableData = async () => {
 
     try {
       // Clear BookingTaxis table data
-      await pool.query("TRUNCATE TABLE TaxiAvailabilityByDate");
+      await pool.query("TRUNCATE TABLE BookingTaxis");
       
       // Clear TaxiAvailabilityByDate table data
       await pool.query("TRUNCATE TABLE TaxiAvailabilityByDate");
@@ -705,6 +712,156 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
   }
 };
 
+const findUserByNameAndMobile = async (name, mobile) => {
+  try {
+    const [users] = await pool.query(
+      `SELECT user_id, name, email, mobile 
+       FROM User 
+       WHERE name LIKE ? AND mobile = ?`,
+      [`%${name}%`, mobile]
+    );
+
+    if (users.length === 0) {
+      return {
+        success: false,
+        message: "User not found"
+      };
+    }
+
+    return {
+      success: true,
+      message: "User found",
+      data: users[0]
+    };
+  } catch (error) {
+    console.error("Error finding user:", error);
+    return {
+      success: false,
+      message: "Failed to find user",
+      error: error.message
+    };
+  }
+};
+
+const searchBookings = async (searchCriteria) => {
+  try {
+    // Validate search criteria
+    if (!searchCriteria || !searchCriteria.userDetails) {
+      return {
+        success: false,
+        message: "User details are required for searching bookings",
+        data: []
+      };
+    }
+
+    const { pickupLocation, dropLocation, date, vehicleType, userDetails } = searchCriteria;
+    const { name, mobile } = userDetails;
+
+    // Validate required user details
+    if (!name || !mobile) {
+      return {
+        success: false,
+        message: "Name and mobile number are required in userDetails",
+        data: []
+      };
+    }
+
+    console.log("Search Criteria:", searchCriteria);
+    
+    // First find the user by name and mobile
+    const userResult = await findUserByNameAndMobile(name, mobile);
+    
+    if (!userResult.success) {
+      return {
+        success: false,
+        message: "User not found",
+        data: []
+      };
+    }
+
+    const userId = userResult.data.user_id;
+    
+    // Build the query using the found user's ID
+    let query = `
+      SELECT 
+        b.*,
+        u.name as user_name,
+        u.email as user_email,
+        u.mobile as user_mobile,
+        CASE 
+          WHEN b.vehicle_type = 'Sedan' THEN t.Sedan_Price
+          WHEN b.vehicle_type = 'Hatchback' THEN t.Hatchback_Price
+          WHEN b.vehicle_type = 'SUV' THEN t.SUV_Price
+          WHEN b.vehicle_type = 'Prime_SUV' THEN t.Prime_SUV_Price
+        END as price
+      FROM BookingTaxis b
+      INNER JOIN User u ON b.user_id = u.user_id
+      INNER JOIN AvailableTaxis t ON b.pickup_location = t.PickupLocation 
+        AND b.drop_location = t.DropLocation
+      WHERE b.user_id = ?
+    `;
+    
+    const queryParams = [userId];
+
+    if (pickupLocation) {
+      query += ` AND b.pickup_location LIKE ?`;
+      queryParams.push(`%${pickupLocation}%`);
+    }
+    
+    if (dropLocation) {
+      query += ` AND b.drop_location LIKE ?`;
+      queryParams.push(`%${dropLocation}%`);
+    }
+
+    if (date) {
+      query += ` AND b.travel_date = ?`;
+      queryParams.push(date);
+    }
+
+    if (vehicleType) {
+      query += ` AND b.vehicle_type = ?`;
+      queryParams.push(vehicleType);
+    }
+
+    query += ` ORDER BY b.booking_date DESC`;
+
+    console.log('Search Query:', query);
+    console.log('Query Parameters:', queryParams);
+
+    const [bookings] = await pool.query(query, queryParams);
+
+    const formattedBookings = bookings.map(booking => ({
+      bookingId: booking.booking_id,
+      bookingDate: booking.booking_date,
+      travelDate: booking.travel_date,
+      departureTime: "10:00", // Default time if not set
+      vehicleType: booking.vehicle_type,
+      numberOfPassengers: booking.number_of_passengers,
+      pickupLocation: booking.pickup_location,
+      dropLocation: booking.drop_location,
+      price: booking.price,
+      userDetails: {
+        name: booking.user_name,
+        email: booking.user_email,
+        mobile: booking.user_mobile
+      }
+    }));
+
+    return {
+      success: true,
+      message: "Bookings retrieved successfully",
+      data: formattedBookings
+    };
+  } catch (error) {
+    console.error("Error searching bookings:", error);
+    return {
+      success: false,
+      message: "Failed to search bookings",
+      error: error.message
+    };
+  }
+};
+
 // Update module exports
 module.exports = {
   createBooking,
@@ -715,5 +872,6 @@ module.exports = {
   processFutureBookings,
   clearTableData,
   checkVehicleAvailability,
-  getAvailableTaxis
+  getAvailableTaxis,
+  searchBookings
 };

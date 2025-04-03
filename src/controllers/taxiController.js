@@ -70,33 +70,30 @@ const mobile_exists = async (req, res) => {
 
 const storeUserDetails = async (req, res) => {
     try {
-        const { name, email, mobile } = req.body.mobile;
-        console.log("req.body", req.body);
-        console.log("name", name);
-        console.log("email", email);
-        console.log("mobile", mobile);
+        console.log("Taxi Controller req.body", req.body);
+        
+        // Extract user details from request body
+        const userDetails = {
+            name: req.body.mobile.name,
+            email: req.body.mobile.email,
+            mobile: req.body.mobile.mobile
+        };
 
-        // Validate if name, email, and mobile number are provided
-        if (!name || !email || !mobile) {
-            return res.status(400).json({
-                success: false,
-                message: "Name, email, and mobile number are required"
-            });
-        }
+        console.log("Processing user details:", userDetails);
 
-        // Store user details in the database
-        const response = await storeUserDetailsService(name, email, mobile); // Call the service function
+        // Call the service function with the user details object
+        const result = await storeUserDetailsService(userDetails);
 
-        if (response.success) {
-            return res.status(201).json(response);
+        if (result.success) {
+            res.status(200).json(result);
         } else {
-            return res.status(400).json(response);
+            res.status(400).json(result);
         }
     } catch (error) {
-        console.error("Error in storeUser Details controller:", error);
-        return res.status(500).json({
+        console.error("Error storing user details:", error);
+        res.status(500).json({
             success: false,
-            message: "Internal server error",
+            message: "Failed to store user details",
             error: error.message
         });
     }

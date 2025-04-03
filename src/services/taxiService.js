@@ -23,7 +23,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
         // First, let's check the raw data in AvailableTaxis
         const [rawData] = await pool.query(
             `SELECT * FROM AvailableTaxis 
-             WHERE PickupLocation = ? AND DropLocation = ?`,
+             WHERE pickup_location = ? AND drop_location = ?`,
             [pickupLocation, dropLocation]
         );
         console.log('Raw AvailableTaxis data:', rawData[0]);
@@ -86,8 +86,8 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 AND travel_date = ? 
                 AND status = 'confirmed') as prime_suv_booked_count
             FROM AvailableTaxis t
-            WHERE t.PickupLocation = ? 
-            AND t.DropLocation = ?
+            WHERE t.pickup_location = ? 
+            AND t.drop_location = ?
         `, [date, date, date, date, date, date, date, date, pickupLocation, dropLocation]);
 
         if (rows.length === 0) {
@@ -176,8 +176,8 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
             message: "Available taxis found successfully",
             data: {
                 routeId: row.TaxiID,
-                pickupLocation: row.PickupLocation,
-                dropLocation: row.DropLocation,
+                pickupLocation: row.pickup_location,
+                dropLocation: row.drop_location,
                 availableDate: date,
                 availableVehicles: availableVehicles,
                 currentBookings: bookings
@@ -231,34 +231,46 @@ const mobileexist = async (mobile) => {
         };
     }
 };
-const storeUserDetailsService = async (name, email, mobile) => {
+
+const storeUserDetailsService = async (userDetails) => {
     try {
-        // Validate input parameters
-        if (!name || !email || !mobile) {
-            return {
-                success: false,
-                message: "Name, email, and mobile number are required"
-                };
-        }
+        console.log("Storing user details:", userDetails);
+        const { name, email, mobile } = userDetails;
 
-        // Query to insert user details into the Users table
-        const [rows] = await pool.query(`
-            INSERT INTO User (name, email, mobile) VALUES (?, ?, ?)
-        `, [name, email, mobile]);
+        // Generate a username from email (part before @)
+        const username = email.split('@')[0];
 
-        if (rows.affectedRows > 0) {
-            // User details inserted successfully
+        // Check if user already exists
+        const [existingUser] = await pool.query(
+            'SELECT * FROM User WHERE mobile = ? OR email = ?',
+            [mobile, email]
+        );
+
+        if (existingUser.length > 0) {
             return {
                 success: true,
-                message: "User details stored successfully"
-            };
-        } else {
-            // User details insertion failed
-            return {
-                success: false,
-                message: "Failed to store user details"
+                message: "User already exists",
+                data: existingUser[0]
             };
         }
+
+        // Insert new user with username
+        const [result] = await pool.query(`
+            INSERT INTO User (username, name, email, mobile, password, isAdmin) 
+            VALUES (?, ?, ?, ?, ?, false)
+        `, [username, name, email, mobile, 'defaultpassword']);
+
+        return {
+            success: true,
+            message: "User details stored successfully",
+            data: {
+                user_id: result.insertId,
+                username,
+                name,
+                email,
+                mobile
+            }
+        };
     } catch (error) {
         console.error("Error storing user details:", error);
         return {
@@ -274,8 +286,8 @@ const createTaxiInventoryTable = async () => {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS AvailableTaxis (
                 TaxiID INT PRIMARY KEY AUTO_INCREMENT,
-                PickupLocation VARCHAR(100),
-                DropLocation VARCHAR(100),
+                pickup_location VARCHAR(100),
+                drop_location VARCHAR(100),
                 Sedan_Available INT DEFAULT 2,
                 Sedan_Price DECIMAL(10,2),
                 Hatchback_Available INT DEFAULT 4,
@@ -335,15 +347,15 @@ const cleanupExpiredBookings = async () => {
 const insertInitialTaxiInventory = async (pickupLocation, dropLocation) => {
     try {
         const [existing] = await pool.query(
-            'SELECT * FROM AvailableTaxis WHERE PickupLocation = ? AND DropLocation = ?',
+            'SELECT * FROM AvailableTaxis WHERE pickup_location = ? AND drop_location = ?',
             [pickupLocation, dropLocation]
         );
 
         if (existing.length === 0) {
             await pool.query(`
                 INSERT INTO AvailableTaxis (
-                    PickupLocation, 
-                    DropLocation, 
+                    pickup_location, 
+                    drop_location, 
                     Sedan_Available, 
                     Sedan_Price,
                     Hatchback_Available,

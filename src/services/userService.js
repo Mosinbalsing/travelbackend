@@ -1,8 +1,9 @@
 const { pool } = require("../config/db");
 const bcrypt = require("bcryptjs"); // ✅ Correct import
 const jwt = require("jsonwebtoken");
-const JWT_SECRET = "qwertyuiop"; // Keep it consistent
+require('dotenv').config();
 
+const JWT_SECRET = process.env.JWT_SECRET || "qwertyuiop"; // Fallback for development
 
 const registerUser = async (user) => {
   console.log(user);
@@ -30,9 +31,7 @@ const registerUser = async (user) => {
 
 const loginUser = async (email, password) => {
   try {
-    const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [
-      email,
-    ]);
+    const [rows] = await pool.query("SELECT * FROM users WHERE email = ?", [email]);
     console.log("Email & Password from service:", email, password);
     console.log("Query result:", rows);
 
@@ -44,30 +43,117 @@ const loginUser = async (email, password) => {
     console.log("User from database:", user);
 
     const passwordMatch = await bcrypt.compare(password, user.password);
-    console.log("Match",passwordMatch);
-    
+    console.log("Match", passwordMatch);
 
     if (!passwordMatch) {
       return { success: false, message: "Invalid password" };
     }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET);
+    // Check if user is admin
+    if (!user.isAdmin) {
+      return { 
+        success: false, 
+        message: "Access denied. Admin privileges required.",
+        isAdmin: false
+      };
+    }
 
+    // Generate token with admin flag
+    const token = jwt.sign(
+      { 
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        isAdmin: true
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
 
-
-
-    return { success: true, message: "Login successful", token };
+    return {
+      success: true,
+      message: "Admin login successful",
+      data: {
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          mobile: user.mobile,
+          isAdmin: true
+        }
+      }
+    };
   } catch (error) {
     console.error("Login error:", error);
     return {
       success: false,
-      message: "Login failed, please try again!",
-      error: error.message,
+      message: "Login failed",
+      error: error.message
     };
   }
 };
 
+// Add admin login function
+const adminLogin = async (email, password) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM users WHERE email = ? AND isAdmin = 1", [email]);
+    
+    if (rows.length === 0) {
+      return { 
+        success: false, 
+        message: "Admin not found or access denied",
+        isAdmin: false
+      };
+    }
 
+    const admin = rows[0];
+    const passwordMatch = await bcrypt.compare(password, admin.password);
+
+    if (!passwordMatch) {
+      return { 
+        success: false, 
+        message: "Invalid admin credentials",
+        isAdmin: false
+      };
+    }
+
+    // Generate admin token
+    const token = jwt.sign(
+      { 
+        userId: admin.id,
+        email: admin.email,
+        name: admin.name,
+        isAdmin: true
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    return {
+      success: true,
+      message: "Admin login successful",
+      data: {
+        token,
+        user: {
+          id: admin.id,
+          name: admin.name,
+          email: admin.email,
+          mobile: admin.mobile,
+          isAdmin: true
+        }
+      }
+    };
+  } catch (error) {
+    console.error("Admin login error:", error);
+    return {
+      success: false,
+      message: "Admin login failed",
+      error: error.message,
+      isAdmin: false
+    };
+  }
+};
 
 const getUserFromToken = async (token) => {
     try {
@@ -104,5 +190,4 @@ const getUserFromToken = async (token) => {
     }
 };
 
-
-module.exports = { registerUser, loginUser, getUserFromToken }; // ✅ Correct export
+module.exports = { registerUser, loginUser, adminLogin, getUserFromToken }; // ✅ Correct export

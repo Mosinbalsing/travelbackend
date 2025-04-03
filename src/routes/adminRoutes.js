@@ -3,6 +3,8 @@ const router = express.Router();
 const { adminLogin } = require('../services/adminService');
 
 router.post('/login', async (req, res) => {
+    console.log("from admin route",req.body);
+    
     try {
         const credentials = {
             email: req.body.email,

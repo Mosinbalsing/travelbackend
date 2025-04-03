@@ -1,28 +1,32 @@
 const express = require('express'); 
-const { register, login ,getUserFromTokencontroller} = require('../controllers/authController');
-const { showAvailableTaxis, mobile_exists , storeUserDetails } = require('../controllers/taxiController');
+const { register, login, adminLoginController, getUserFromTokencontroller } = require('../controllers/authController');
+const { showAvailableTaxis, mobile_exists, storeUserDetails } = require('../controllers/taxiController');
 const router = express.Router();
 const { sendOTPController, verifyOTPController } = require('../controllers/otpController');
 const authController = require('../controllers/authController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const adminMiddleware = require('../middlewares/adminMiddleware');
 const { getUserByMobile } = require('../controllers/userController');
 const { updateAllTaxiInventory } = require('../services/taxiService');
 
+// Public routes
 router.post('/signup', register);
 router.post('/login', login);
+router.post('/admin/login', adminLoginController);
 router.get('/getuserdata', getUserFromTokencontroller);
 router.post('/available-taxis', showAvailableTaxis);
 router.post('/search-mobile', mobile_exists);
 router.post('/store-user-details', storeUserDetails);
-// OTP routes as part of auth
+
+// OTP routes
 router.post('/send-otp', sendOTPController);
 router.post('/verify-otp', verifyOTPController);
 
-// Update the route to use POST and remove authMiddleware
-router.post('/get-user-by-mobile', getUserByMobile);
+// Protected routes
+router.post('/get-user-by-mobile', authMiddleware, getUserByMobile);
 
-// Update this route
-router.post('/update-taxi-inventory', async (req, res) => {
+// Admin routes
+router.post('/update-taxi-inventory', adminMiddleware, async (req, res) => {
     try {
         const result = await updateAllTaxiInventory();
         if (result.success) {

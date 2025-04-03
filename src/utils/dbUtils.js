@@ -12,76 +12,83 @@ const dropBookingsTable = async () => {
 };
 
 const createTablesIfNotExist = async () => {
-  const connection = await pool.getConnection();
-  
-  try {
-    await connection.beginTransaction();
+    try {
+        // First, create the users table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                mobile VARCHAR(20) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                isAdmin BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
 
-    // Check if tables exist
-    const [tables] = await connection.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = DATABASE()
-      AND table_name IN ('AvailableTaxis')
-    `);
+        // Then create the AvailableTaxis table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS AvailableTaxis (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                pickup_location VARCHAR(255) NOT NULL,
+                drop_location VARCHAR(255) NOT NULL,
+                Sedan_Price DECIMAL(10,2) DEFAULT 0,
+                Hatchback_Price DECIMAL(10,2) DEFAULT 0,
+                SUV_Price DECIMAL(10,2) DEFAULT 0,
+                Prime_SUV_Price DECIMAL(10,2) DEFAULT 0,
+                Sedan_Available INT DEFAULT 0,
+                Hatchback_Available INT DEFAULT 0,
+                SUV_Available INT DEFAULT 0,
+                Prime_SUV_Available INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
 
-    const existingTables = tables.map(t => t.TABLE_NAME);
-    console.log("Existing tables:", existingTables);
+        // Finally, create the BookingTaxis table with the foreign key
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS BookingTaxis (
+                booking_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                user_id INT UNSIGNED NOT NULL,
+                booking_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                travel_date DATE NOT NULL,
+                departure_time TIME NOT NULL,
+                vehicle_type ENUM('Sedan', 'Hatchback', 'SUV', 'Prime_SUV') NOT NULL,
+                number_of_passengers INT NOT NULL,
+                pickup_location VARCHAR(255) NOT NULL,
+                drop_location VARCHAR(255) NOT NULL,
+                status ENUM('pending', 'confirmed', 'cancelled') DEFAULT 'pending',
+                price DECIMAL(10,2),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
 
-    // Create AvailableTaxis if it doesn't exist
-    if (!existingTables.includes('AvailableTaxis')) {
-      console.log("Creating AvailableTaxis table...");
-      await connection.query(`
-        CREATE TABLE AvailableTaxis (
-            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            pickup_location VARCHAR(255) NOT NULL,
-            drop_location VARCHAR(255) NOT NULL,
-            Sedan_Available INT DEFAULT 0,
-            Hatchback_Available INT DEFAULT 0,
-            SUV_Available INT DEFAULT 0,
-            Prime_SUV_Available INT DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-      `);
-
-      // Insert initial data only if table was just created
-      console.log("Inserting initial data...");
-      await connection.query(`
-        INSERT INTO AvailableTaxis 
-        (pickup_location, drop_location, Sedan_Available, Hatchback_Available, SUV_Available, Prime_SUV_Available)
-        VALUES 
-        ('Mumbai', 'Pune', 5, 5, 5, 5),
-        ('Pune', 'Mumbai', 5, 5, 5, 5),
-        ('Mumbai', 'Nashik', 5, 5, 5, 5),
-        ('Nashik', 'Mumbai', 5, 5, 5, 5),
-        ('Pune', 'Nashik', 5, 5, 5, 5),
-        ('Nashik', 'Pune', 5, 5, 5, 5)
-      `);
+        console.log('✅ All tables created successfully');
+    } catch (error) {
+        console.error('❌ Error creating tables:', error);
+        throw error;
     }
-
-    await connection.commit();
-    console.log("✅ Database check completed successfully!");
-
-  } catch (error) {
-    await connection.rollback();
-    console.error("❌ Error in database operations:", error);
-    throw error;
-  } finally {
-    connection.release();
-  }
 };
 
 const initializeDatabase = async () => {
-  try {
-    await createTablesIfNotExist();
-    await createAdminTable();
-    console.log("✅ Database initialization completed!");
-  } catch (error) {
-    console.error("❌ Database initialization failed:", error);
-    // Don't exit process, just log the error
-    console.error(error);
-  }
+    try {
+        // Drop existing tables if they exist
+        // await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+        // await pool.query('DROP TABLE IF EXISTS AvailableTaxis');
+        // await pool.query('DROP TABLE IF EXISTS users');
+
+        // Create tables if they don't exist
+        await createTablesIfNotExist();
+        await createAdminTable();
+        console.log('Database initialized successfully');
+    } catch (error) {
+        console.error('❌ Database initialization failed:', error);
+        throw error;
+    }
 };
 
 // Add this function to create Admin table
@@ -100,9 +107,9 @@ const createAdminTable = async () => {
 
         // Insert default admin if not exists
         const defaultAdmin = {
-            email: 'rahul@gmail.com',
+            email: 'sneha@gmail.com',
             password: 'Admin123',
-            mobile: '9021710342'
+            mobile: '9604064897'
         };
 
         // Check if admin exists
@@ -125,7 +132,32 @@ const createAdminTable = async () => {
     }
 };
 
+
+const insertDefaultAdmin = async () => {
+    try {
+        const defaultAdmin = {
+            email: "sneha@gmail.com",
+            password: "Admin123",
+            mobile: "9604064897"
+        };
+
+        const [existing] = await pool.query("SELECT * FROM Admin WHERE email = ?", [defaultAdmin.email]);
+        if (existing.length === 0) {
+            const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
+            await pool.query(
+                "INSERT INTO Admin (email, password, mobile) VALUES (?, ?, ?)",
+                [defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
+            );
+            console.log("✅ Default admin account created successfully!");
+        }
+    } catch (error) {
+        console.error("❌ Error inserting default admin:", error);
+        throw error;
+    }
+};
+insertDefaultAdmin()
 module.exports = { 
+    insertDefaultAdmin,
     createTablesIfNotExist, 
     initializeDatabase,
     createAdminTable,

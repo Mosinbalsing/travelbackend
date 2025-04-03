@@ -34,6 +34,7 @@ const createBookingDetails = async (req, res) => {
 };
 
 const searchBookingsController = async (req, res) => {
+  
   try {
     console.log("Received search request headers:", req.headers);
     console.log("Received search request body:", req.body);

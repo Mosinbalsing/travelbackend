@@ -2,7 +2,16 @@ const { pool } = require("../config/db");
 
 const createBookingTable = async () => {
   try {
-    // Create BookingTaxis table with initial booking_id set to 1001
+    console.log("Creating BookingTaxis table...");
+    
+    // First, check if table exists
+    const [existingTables] = await pool.query('SHOW TABLES LIKE "BookingTaxis"');
+    if (existingTables.length > 0) {
+      console.log("BookingTaxis table already exists");
+      return;
+    }
+
+    // Create BookingTaxis table
     await pool.query(`
             CREATE TABLE IF NOT EXISTS BookingTaxis (
                 booking_id INT PRIMARY KEY AUTO_INCREMENT,
@@ -16,8 +25,14 @@ const createBookingTable = async () => {
                 status VARCHAR(20) DEFAULT 'confirmed',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES User(user_id)
-            )
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
+
+    // Verify table was created
+    const [tables] = await pool.query('SHOW TABLES LIKE "BookingTaxis"');
+    if (tables.length === 0) {
+      throw new Error("Failed to create BookingTaxis table");
+    }
 
     // Set the initial booking_id to 1001 if the table is empty
     const [count] = await pool.query('SELECT COUNT(*) as count FROM BookingTaxis');
@@ -34,12 +49,13 @@ const createBookingTable = async () => {
                 pickup_location VARCHAR(100),
                 drop_location VARCHAR(100),
                 available_count INT,
+                restoration_time DATETIME,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
 
-    console.log("Tables created successfully");
+    console.log("All tables created successfully");
   } catch (error) {
     console.error("Error creating tables:", error);
     throw error;
@@ -49,32 +65,23 @@ const createBookingTable = async () => {
 const createBooking = async (bookingData) => {
   try {
     await createBookingTable();
-    console.log("Booking table checked/created successfully", bookingData);
     
-    // Validate vehicle type
     const validVehicleTypes = ["Sedan", "Hatchback", "SUV", "Prime_SUV"];
     if (!validVehicleTypes.includes(bookingData.vehicleType)) {
-      console.log("Invalid vehicle type:", bookingData.vehicleType);
       return {
         success: false,
-        message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(", ")}`,
+        message: `Invalid vehicle type. Must be one of: ${validVehicleTypes.join(", ")}`
       };
     }
 
-    // Validate travel date and time
     const travelDate = new Date(bookingData.travelDate);
     const today = new Date();
-    const currentHour = today.getHours();
-    const currentMinutes = today.getMinutes();
-
-    // If booking is for today and current time is past 7 PM
-    if (
-      travelDate.toDateString() === today.toDateString() &&
-      (currentHour > 22 || (currentHour === 22 && currentMinutes > 0))
-    ) { 
+    
+    if (travelDate.toDateString() === today.toDateString() && 
+        (today.getHours() > 22 || (today.getHours() === 22 && today.getMinutes() > 0))) {
       return {
         success: false,
-        message: "Cannot create bookings after 7 PM for today",
+        message: "Cannot create bookings after 10 PM for today"
       };
     }
 
@@ -82,106 +89,51 @@ const createBooking = async (bookingData) => {
       "SELECT user_id FROM User WHERE mobile = ?",
       [bookingData.userDetails.mobile]
     );
-
-    if (!user || user.length === 0) {
-      return {
-        success: false,
-        message: "User not found",
-      };
-    }
+    if (!user?.length) return { success: false, message: "User not found" };
 
     const userId = user[0].user_id;
-    const currentDateTime = new Date()
-      .toISOString()
-      .slice(0, 19)
-      .replace("T", " ");
+    const currentDateTime = new Date().toISOString().slice(0, 19).replace("T", " ");
+    const checkColumn = `${bookingData.vehicleType}_Available`;
 
-    // Start a transaction
     await pool.query("START TRANSACTION");
 
     try {
-      let checkColumn;
-      switch (bookingData.vehicleType) {
-        case "Sedan":
-          checkColumn = "Sedan_Available";
-          break;
-        case "Hatchback":
-          checkColumn = "Hatchback_Available";
-          break;
-        case "SUV":
-          checkColumn = "SUV_Available";
-          break;
-        case "Prime_SUV":
-          checkColumn = "Prime_SUV_Available";
-          break;
-        default:
-          throw new Error("Invalid vehicle type");
-      }
-
-      // Check availability considering existing bookings for the travel date
       const [availability] = await pool.query(
         `SELECT a.*, 
-                    COALESCE(b.booked_count, 0) as booked_count
-                FROM AvailableTaxis a
-                LEFT JOIN (
-                    SELECT COUNT(*) as booked_count
-                    FROM BookingTaxis
-                    WHERE vehicle_type = ?
-                    AND travel_date = ?
-                    AND status = 'confirmed'
-                ) b ON 1=1
-                WHERE a.${checkColumn} > COALESCE(b.booked_count, 0)
-                AND a.PickupLocation = ?
-                AND a.DropLocation = ?`,
+                COALESCE(b.booked_count, 0) as booked_count
+         FROM AvailableTaxis a
+         LEFT JOIN (
+           SELECT COUNT(*) as booked_count
+           FROM BookingTaxis
+           WHERE vehicle_type = ?
+           AND travel_date = ?
+           AND status = 'confirmed'
+         ) b ON 1=1
+         WHERE a.${checkColumn} > COALESCE(b.booked_count, 0)
+         AND a.pickup_location = ?
+         AND a.drop_location = ?`,
         [
           bookingData.vehicleType,
           bookingData.travelDate,
           bookingData.pickupLocation,
-          bookingData.dropLocation,
+          bookingData.dropLocation
         ]
       );
 
-      if (!availability || availability.length === 0) {
+      if (!availability.length) {
         await pool.query("ROLLBACK");
         return {
           success: false,
-          message: `No ${bookingData.vehicleType} vehicles available for this date. All vehicles are already booked.`,
+          message: `No ${bookingData.vehicleType} vehicles available for this route and date`
         };
       }
 
-      // Double check the current booking count for this vehicle type and date
-      const [currentBookings] = await pool.query(
-        `SELECT COUNT(*) as booked_count
-         FROM BookingTaxis
-         WHERE vehicle_type = ?
-         AND travel_date = ?
-         AND status = 'confirmed'`,
-        [bookingData.vehicleType, bookingData.travelDate]
-      );
-
-      const bookedCount = currentBookings[0].booked_count;
-      const availableCount = availability[0][checkColumn];
-
-      if (bookedCount >= availableCount) {
-        await pool.query("ROLLBACK");
-        return {
-          success: false,
-          message: `Cannot book ${bookingData.vehicleType}. All ${availableCount} vehicles are already booked for this date.`,
-        };
-      }
-
-      // Insert booking
       const [result] = await pool.query(
         `INSERT INTO BookingTaxis (
-                    booking_date,
-                    travel_date,
-                    vehicle_type,
-                    number_of_passengers,
-                    pickup_location,
-                    drop_location,
-                    user_id,
-                    status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
+          booking_date, travel_date, vehicle_type,
+          number_of_passengers, pickup_location,
+          drop_location, user_id, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
         [
           currentDateTime,
           bookingData.travelDate,
@@ -189,90 +141,87 @@ const createBooking = async (bookingData) => {
           bookingData.numberOfPassengers || 1,
           bookingData.pickupLocation,
           bookingData.dropLocation,
-          userId,
+          userId
         ]
       );
 
-      // Handle taxi count based on travel date
-      if (travelDate.toDateString() === today.toDateString()) {
-        // For today's bookings, decrement for all routes but ensure it doesn't go below 0
-        await pool.query(
-          `UPDATE AvailableTaxis 
-                    SET ${checkColumn} = GREATEST(${checkColumn} - 1, 0)
-                    WHERE ${checkColumn} > 0`,
-          []
-        );
+      // Update TaxiAvailabilityByDate for all bookings, not just same-day ones
+      // Check if there's already an entry for this date and vehicle type
+      const [existingAvailability] = await pool.query(
+        `SELECT * FROM TaxiAvailabilityByDate 
+         WHERE travel_date = ? AND vehicle_type = ?`,
+        [bookingData.travelDate, bookingData.vehicleType]
+      );
 
-        // Update TaxiAvailabilityByDate for today only
+      // Set restoration time to midnight (12:00 AM) of the travel date
+      const restorationTime = new Date(bookingData.travelDate);
+      restorationTime.setHours(0, 0, 0, 0);
+
+      if (existingAvailability.length > 0) {
+        // Update existing entry
+        await pool.query(
+          `UPDATE TaxiAvailabilityByDate 
+           SET available_count = available_count - 1,
+               pickup_location = ?,
+               drop_location = ?,
+               restoration_time = ?
+           WHERE travel_date = ? AND vehicle_type = ?`,
+          [bookingData.pickupLocation, bookingData.dropLocation, restorationTime, bookingData.travelDate, bookingData.vehicleType]
+        );
+      } else {
+        // Create new entry
         await pool.query(
           `INSERT INTO TaxiAvailabilityByDate 
-          (travel_date, vehicle_type, available_count)
-          VALUES (?, ?, 1)
-          ON DUPLICATE KEY UPDATE 
-          available_count = available_count + 1`,
-          [bookingData.travelDate, bookingData.vehicleType]
+           (travel_date, vehicle_type, pickup_location, drop_location, available_count, restoration_time)
+           VALUES (?, ?, ?, ?, -1, ?)`,
+          [bookingData.travelDate, bookingData.vehicleType, bookingData.pickupLocation, bookingData.dropLocation, restorationTime]
+        );
+      }
+
+      // For same-day bookings, also update AvailableTaxis table
+      if (travelDate.toDateString() === today.toDateString()) {
+        await pool.query(
+          `UPDATE AvailableTaxis 
+           SET ${checkColumn} = ${checkColumn} - 1
+           WHERE pickup_location = ? AND drop_location = ?`,
+          [bookingData.pickupLocation, bookingData.dropLocation]
         );
 
-        // Schedule availability restoration after 2 minutes
         const twoMinutesLater = new Date();
         twoMinutesLater.setMinutes(twoMinutesLater.getMinutes() + 2);
 
-        // Store the restoration time in the database
         await pool.query(
           `INSERT INTO TaxiAvailabilityByDate 
-          (travel_date, vehicle_type, available_count, restoration_time)
-          VALUES (?, ?, 1, ?)
-          ON DUPLICATE KEY UPDATE 
-          restoration_time = ?`,
-          [bookingData.travelDate, bookingData.vehicleType, twoMinutesLater, twoMinutesLater]
-        );
-      } else {
-        // For future dates, only update TaxiAvailabilityByDate for the specific date
-        await pool.query(
-          `INSERT INTO TaxiAvailabilityByDate 
-          (travel_date, vehicle_type, available_count)
-          VALUES (?, ?, 1)
-          ON DUPLICATE KEY UPDATE 
-          available_count = available_count + 1`,
-          [bookingData.travelDate, bookingData.vehicleType]
+           (travel_date, vehicle_type, pickup_location,
+            drop_location, available_count, restoration_time)
+           VALUES (?, ?, ?, ?, 1, ?)
+           ON DUPLICATE KEY UPDATE 
+           restoration_time = ?`,
+          [
+            bookingData.travelDate,
+            bookingData.vehicleType,
+            bookingData.pickupLocation,
+            bookingData.dropLocation,
+            twoMinutesLater,
+            twoMinutesLater
+          ]
         );
       }
 
       await pool.query("COMMIT");
 
-      // Schedule restoration for the end of the travel date
-      const restorationTime = new Date(bookingData.travelDate);
-      restorationTime.setHours(23, 59, 59); // End of the travel date
-
-      const now = new Date();
-      const delayMs = restorationTime.getTime() - now.getTime();
+      const delayMs = restorationTime.getTime() - new Date().getTime();
 
       if (delayMs > 0) {
         setTimeout(async () => {
           try {
-            // Restore availability at the end of the travel date, but don't exceed original count
             await pool.query(
               `UPDATE AvailableTaxis 
-               SET ${checkColumn} = LEAST(${checkColumn} + 1, (
-                   SELECT original_count 
-                   FROM (
-                       SELECT ${checkColumn} as original_count 
-                       FROM AvailableTaxis 
-                       LIMIT 1
-                   ) as original
-               ))
-               WHERE ${checkColumn} < (
-                   SELECT original_count 
-                   FROM (
-                       SELECT ${checkColumn} as original_count 
-                       FROM AvailableTaxis 
-                       LIMIT 1
-                   ) as original
-               )`,
-              []
+               SET ${checkColumn} = ${checkColumn} + 1
+               WHERE pickup_location = ? AND drop_location = ?`,
+              [bookingData.pickupLocation, bookingData.dropLocation]
             );
 
-            // Update booking status only for the specific date
             await pool.query(
               `UPDATE BookingTaxis 
                SET status = 'completed'
@@ -280,10 +229,6 @@ const createBooking = async (bookingData) => {
                AND travel_date = ?
                AND status = 'confirmed'`,
               [bookingData.vehicleType, bookingData.travelDate]
-            );
-
-            console.log(
-              `Restored availability for booking ${result.insertId} after travel date`
             );
           } catch (error) {
             console.error("Error in scheduled restoration:", error);
@@ -302,8 +247,8 @@ const createBooking = async (bookingData) => {
           numberOfPassengers: bookingData.numberOfPassengers,
           pickupLocation: bookingData.pickupLocation,
           dropLocation: bookingData.dropLocation,
-          userDetails: bookingData.userDetails,
-        },
+          userDetails: bookingData.userDetails
+        }
       };
     } catch (error) {
       await pool.query("ROLLBACK");
@@ -314,47 +259,86 @@ const createBooking = async (bookingData) => {
     return {
       success: false,
       message: "Failed to create booking",
-      error: error.message,
+      error: error.message
     };
   }
 };
 
 // Update restore availability function to work with dates
-const restoreAvailability = async (vehicleType, travelDate) => {
+const restoreAvailability = async (vehicleType, travelDate, pickupLocation, dropLocation) => {
   try {
-    let updateColumn;
-    switch (vehicleType) {
-      case "Sedan":
-        updateColumn = "Sedan_Available";
-        break;
-      case "Hatchback":
-        updateColumn = "Hatchback_Available";
-        break;
-      case "SUV":
-        updateColumn = "SUV_Available";
-        break;
-      case "Prime_SUV":
-        updateColumn = "Prime_SUV_Available";
-        break;
-      default:
-        throw new Error("Invalid vehicle type");
+    // Validate vehicle type
+    const validVehicleTypes = ["Sedan", "Hatchback", "SUV", "Prime_SUV"];
+    if (!validVehicleTypes.includes(vehicleType)) {
+      throw new Error(`Invalid vehicle type. Must be one of: ${validVehicleTypes.join(", ")}`);
     }
 
-    // Update booking status first
-    await pool.query(
-      `UPDATE BookingTaxis 
-             SET status = 'completed'
-             WHERE vehicle_type = ?
-             AND travel_date = ?
-             AND status = 'confirmed'`,
-      [vehicleType, travelDate]
-    );
+    const updateColumn = `${vehicleType}_Available`;
 
-    console.log(`Restored availability for ${vehicleType} on ${travelDate}`);
-    return true;
+    // Start transaction for atomic operations
+    await pool.query("START TRANSACTION");
+
+    try {
+      // 1. Update booking status
+      await pool.query(
+        `UPDATE BookingTaxis 
+         SET status = 'completed'
+         WHERE vehicle_type = ?
+         AND travel_date = ?
+         AND status = 'confirmed'`,
+        [vehicleType, travelDate]
+      );
+
+      // 2. Restore availability count for specific route if locations are provided
+      if (pickupLocation && dropLocation) {
+        await pool.query(
+          `UPDATE AvailableTaxis 
+           SET ${updateColumn} = ${updateColumn} + 1
+           WHERE pickup_location = ? 
+           AND drop_location = ?`,
+          [pickupLocation, dropLocation]
+        );
+      } else {
+        // If no specific route provided, restore one availability globally
+        await pool.query(
+          `UPDATE AvailableTaxis 
+           SET ${updateColumn} = ${updateColumn} + 1
+           LIMIT 1`
+        );
+      }
+
+      // 3. Update availability tracking
+      await pool.query(
+        `UPDATE TaxiAvailabilityByDate
+         SET available_count = GREATEST(available_count - 1, 0),
+             restoration_time = NULL
+         WHERE vehicle_type = ?
+         AND travel_date = ?`,
+        [vehicleType, travelDate]
+      );
+
+      await pool.query("COMMIT");
+
+      console.log(`Successfully restored availability for ${vehicleType} on ${travelDate}`);
+      return {
+        success: true,
+        message: `Availability restored for ${vehicleType}`,
+        vehicleType,
+        travelDate
+      };
+    } catch (error) {
+      await pool.query("ROLLBACK");
+      throw error;
+    }
   } catch (error) {
     console.error("Error restoring availability:", error);
-    throw error;
+    return {
+      success: false,
+      message: "Failed to restore availability",
+      error: error.message,
+      vehicleType,
+      travelDate
+    };
   }
 };
 
@@ -471,18 +455,25 @@ const handleExpiredBookings = async () => {
 // Update the pending restorations handler
 const handlePendingRestorations = async () => {
   try {
+    // Check if table exists before querying
+    const [tables] = await pool.query('SHOW TABLES LIKE "BookingTaxis"');
+    if (tables.length === 0) {
+      console.log("BookingTaxis table does not exist, skipping pending restorations");
+      return;
+    }
+
     const [pendingBookings] = await pool.query(`
-            SELECT booking_id, vehicle_type
+            SELECT vehicle_type, travel_date
             FROM BookingTaxis
             WHERE status = 'confirmed'
             AND booking_date >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-            GROUP BY vehicle_type
+            GROUP BY vehicle_type, travel_date
         `);
 
     for (const booking of pendingBookings) {
       await restoreAvailability(booking.vehicle_type, booking.travel_date);
       console.log(
-        `Restored availability for pending bookings of type ${booking.vehicle_type}`
+        `Restored availability for pending bookings of type ${booking.vehicle_type} for date ${booking.travel_date}`
       );
     }
   } catch (error) {
@@ -603,58 +594,74 @@ const checkVehicleAvailability = async (vehicleType, travelDate) => {
         throw new Error("Invalid vehicle type");
     }
 
-    // Check if vehicle is available for the specific date
-    const [availability] = await pool.query(
-      `SELECT 
-        a.${checkColumn} as total_count,
-        COALESCE(b.booked_count, 0) as booked_count,
-        COALESCE(t.restoration_time, NULL) as restoration_time
-      FROM AvailableTaxis a
-      LEFT JOIN (
-        SELECT COUNT(*) as booked_count
-        FROM BookingTaxis
-        WHERE vehicle_type = ?
-        AND travel_date = ?
-        AND status = 'confirmed'
-      ) b ON 1=1
-      LEFT JOIN TaxiAvailabilityByDate t ON t.vehicle_type = ?
-      AND t.travel_date = ?`,
-      [vehicleType, travelDate, vehicleType, travelDate]
+    // First check TaxiAvailabilityByDate table
+    const [dateAvailability] = await pool.query(
+      `SELECT available_count, restoration_time
+       FROM TaxiAvailabilityByDate
+       WHERE vehicle_type = ? AND travel_date = ?`,
+      [vehicleType, travelDate]
     );
 
-    if (!availability || availability.length === 0) {
+    // If there's a negative available_count, the vehicle is not available for this date
+    if (dateAvailability && dateAvailability.length > 0 && dateAvailability[0].available_count < 0) {
+      return {
+        available: false,
+        message: `Vehicle is not available for ${travelDate}`
+      };
+    }
+
+    // Check if vehicle is temporarily unavailable (within 2-minute window)
+    if (dateAvailability && dateAvailability.length > 0 && 
+        dateAvailability[0].restoration_time && 
+        new Date(dateAvailability[0].restoration_time) > new Date()) {
+      return {
+        available: false,
+        message: "Vehicle is temporarily unavailable",
+        nextAvailable: dateAvailability[0].restoration_time
+      };
+    }
+
+    // Get total available count from AvailableTaxis
+    const [totalAvailability] = await pool.query(
+      `SELECT ${checkColumn} as total_count
+       FROM AvailableTaxis
+       LIMIT 1`
+    );
+
+    if (!totalAvailability || totalAvailability.length === 0) {
       return {
         available: false,
         message: "No vehicles available"
       };
     }
 
-    const totalCount = availability[0].total_count;
-    const bookedCount = availability[0].booked_count;
-    const restorationTime = availability[0].restoration_time;
+    const totalCount = totalAvailability[0].total_count;
+
+    // Get booked count for this date
+    const [bookedCount] = await pool.query(
+      `SELECT COUNT(*) as booked_count
+       FROM BookingTaxis
+       WHERE vehicle_type = ?
+       AND travel_date = ?
+       AND status = 'confirmed'`,
+      [vehicleType, travelDate]
+    );
+
+    const currentBookedCount = bookedCount[0].booked_count;
 
     // If all vehicles are booked for this date
-    if (bookedCount >= totalCount) {
+    if (currentBookedCount >= totalCount) {
       return {
         available: false,
         message: `All ${totalCount} vehicles are booked for ${travelDate}. Vehicle is not available for any route on this date.`
       };
     }
 
-    // If vehicle is temporarily unavailable (within 2-minute window)
-    if (restorationTime && new Date(restorationTime) > new Date()) {
-      return {
-        available: false,
-        message: "Vehicle is temporarily unavailable",
-        nextAvailable: restorationTime
-      };
-    }
-
     return {
       available: true,
-      message: `${totalCount - bookedCount} vehicles available`,
+      message: `${totalCount - currentBookedCount} vehicles available`,
       totalCount,
-      bookedCount
+      bookedCount: currentBookedCount
     };
   } catch (error) {
     console.error("Error checking vehicle availability:", error);
@@ -796,8 +803,8 @@ const searchBookings = async (searchCriteria) => {
         END as price
       FROM BookingTaxis b
       INNER JOIN User u ON b.user_id = u.user_id
-      INNER JOIN AvailableTaxis t ON b.pickup_location = t.PickupLocation 
-        AND b.drop_location = t.DropLocation
+      LEFT JOIN AvailableTaxis t ON b.pickup_location = t.pickup_location 
+        AND b.drop_location = t.drop_location
       WHERE b.user_id = ?
     `;
     
@@ -862,6 +869,322 @@ const searchBookings = async (searchCriteria) => {
   }
 };
 
+// Add this function to drop and recreate tables
+const dropAndRecreateTables = async () => {
+  try {
+    console.log("Starting table recreation process...");
+    
+    // Drop tables in reverse order of dependencies
+    console.log("Dropping tables in correct order...");
+    await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+    await pool.query('DROP TABLE IF EXISTS PastBookings');
+    await pool.query('DROP TABLE IF EXISTS TaxiAvailabilityByDate');
+    await pool.query('DROP TABLE IF EXISTS AvailableTaxis');
+    await pool.query('DROP TABLE IF EXISTS User');
+    console.log("All tables dropped successfully");
+
+    // Create User table first
+    console.log("Creating User table...");
+    await pool.query(`
+        CREATE TABLE User (
+            user_id INT PRIMARY KEY AUTO_INCREMENT,
+            username VARCHAR(255) NOT NULL,
+            name VARCHAR(255) NOT NULL,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            mobile VARCHAR(20) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            isAdmin BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log("User table created successfully");
+
+    // Create AvailableTaxis table
+    console.log("Creating AvailableTaxis table...");
+    await pool.query(`
+        CREATE TABLE AvailableTaxis (
+            TaxiID INT PRIMARY KEY AUTO_INCREMENT,
+            pickup_location VARCHAR(100),
+            drop_location VARCHAR(100),
+            Sedan_Available INT DEFAULT 2,
+            Sedan_Price DECIMAL(10,2) DEFAULT 1500.00,
+            Hatchback_Available INT DEFAULT 4,
+            Hatchback_Price DECIMAL(10,2) DEFAULT 1200.00,
+            SUV_Available INT DEFAULT 1,
+            SUV_Price DECIMAL(10,2) DEFAULT 2000.00,
+            Prime_SUV_Available INT DEFAULT 1,
+            Prime_SUV_Price DECIMAL(10,2) DEFAULT 2500.00,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log("AvailableTaxis table created successfully");
+
+    // Create BookingTaxis table
+    console.log("Creating BookingTaxis table...");
+    await pool.query(`
+        CREATE TABLE BookingTaxis (
+            booking_id INT PRIMARY KEY AUTO_INCREMENT,
+            booking_date DATETIME,
+            travel_date DATE,
+            vehicle_type VARCHAR(50),
+            number_of_passengers INT,
+            pickup_location VARCHAR(100),
+            drop_location VARCHAR(100),
+            user_id INT,
+            status VARCHAR(20) DEFAULT 'confirmed',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES User(user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log("BookingTaxis table created successfully");
+
+    // Create PastBookings table
+    console.log("Creating PastBookings table...");
+    await pool.query(`
+        CREATE TABLE PastBookings (
+            booking_id INT PRIMARY KEY AUTO_INCREMENT,
+            booking_date DATETIME,
+            travel_date DATE,
+            vehicle_type VARCHAR(50),
+            number_of_passengers INT,
+            pickup_location VARCHAR(100),
+            drop_location VARCHAR(100),
+            user_id INT,
+            status VARCHAR(20),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES User(user_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log("PastBookings table created successfully");
+
+    // Create TaxiAvailabilityByDate table
+    console.log("Creating TaxiAvailabilityByDate table...");
+    await pool.query(`
+        CREATE TABLE TaxiAvailabilityByDate (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            travel_date DATE,
+            vehicle_type VARCHAR(50),
+            pickup_location VARCHAR(100),
+            drop_location VARCHAR(100),
+            available_count INT,
+            restoration_time DATETIME,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log("TaxiAvailabilityByDate table created successfully");
+
+    // Insert a default admin user
+    console.log("Creating default admin user...");
+    const bcrypt = require('bcryptjs');
+    const hashedPassword = await bcrypt.hash('admin123', 10);
+    
+    await pool.query(`
+        INSERT INTO User (username, name, email, mobile, password, isAdmin)
+        VALUES ('admin', 'Admin User', 'admin@example.com', '1234567890', ?, true)
+    `, [hashedPassword]);
+    console.log("Default admin user created successfully");
+
+    // Insert some initial taxi inventory
+    console.log("Inserting initial taxi inventory...");
+    await pool.query(`
+        INSERT INTO AvailableTaxis (
+            pickup_location, 
+            drop_location, 
+            Sedan_Available, 
+            Sedan_Price,
+            Hatchback_Available,
+            Hatchback_Price,
+            SUV_Available,
+            SUV_Price,
+            Prime_SUV_Available,
+            Prime_SUV_Price
+        ) VALUES 
+        ('Mumbai', 'Pune', 4, 1500.00, 2, 1200.00, 1, 2000.00, 1, 2500.00),
+        ('Pune', 'Mumbai', 4, 1500.00, 2, 1200.00, 1, 2000.00, 1, 2500.00)
+    `);
+    console.log("Initial taxi inventory inserted successfully");
+
+    console.log("All tables recreated successfully");
+    return {
+        success: true,
+        message: "All tables recreated successfully"
+    };
+  } catch (error) {
+    console.error("Error recreating tables:", error);
+    console.error("Error initializing booking service:", error);
+    throw error;
+  }
+};
+
+// Add this function to create tables if they don't exist
+const createTablesIfNotExist = async () => {
+  try {
+    console.log("Checking and creating tables if they don't exist...");
+    
+    // Check if User table exists
+    const [userTableExists] = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'User'
+    `);
+    
+    if (userTableExists[0].count === 0) {
+      console.log("Creating User table...");
+      await pool.query(`
+          CREATE TABLE User (
+              user_id INT PRIMARY KEY AUTO_INCREMENT,
+              username VARCHAR(255) NOT NULL,
+              name VARCHAR(255) NOT NULL,
+              email VARCHAR(255) UNIQUE NOT NULL,
+              mobile VARCHAR(20) UNIQUE NOT NULL,
+              password VARCHAR(255) NOT NULL,
+              isAdmin BOOLEAN DEFAULT FALSE,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          )
+      `);
+      console.log("User table created successfully");
+    } else {
+      console.log("User table already exists");
+    }
+    
+    // Check if AvailableTaxis table exists
+    const [availableTaxisTableExists] = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'AvailableTaxis'
+    `);
+    
+    if (availableTaxisTableExists[0].count === 0) {
+      console.log("Creating AvailableTaxis table...");
+      await pool.query(`
+          CREATE TABLE AvailableTaxis (
+              TaxiID INT PRIMARY KEY AUTO_INCREMENT,
+              pickup_location VARCHAR(100),
+              drop_location VARCHAR(100),
+              Sedan_Available INT DEFAULT 2,
+              Sedan_Price DECIMAL(10,2) DEFAULT 1500.00,
+              Hatchback_Available INT DEFAULT 4,
+              Hatchback_Price DECIMAL(10,2) DEFAULT 1200.00,
+              SUV_Available INT DEFAULT 1,
+              SUV_Price DECIMAL(10,2) DEFAULT 2000.00,
+              Prime_SUV_Available INT DEFAULT 1,
+              Prime_SUV_Price DECIMAL(10,2) DEFAULT 2500.00,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      console.log("AvailableTaxis table created successfully");
+    } else {
+      console.log("AvailableTaxis table already exists");
+    }
+    
+    // Check if TaxiAvailabilityByDate table exists
+    const [taxiAvailabilityTableExists] = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'TaxiAvailabilityByDate'
+    `);
+    
+    if (taxiAvailabilityTableExists[0].count === 0) {
+      console.log("Creating TaxiAvailabilityByDate table...");
+      await pool.query(`
+          CREATE TABLE TaxiAvailabilityByDate (
+              id INT PRIMARY KEY AUTO_INCREMENT,
+              travel_date DATE NOT NULL,
+              vehicle_type VARCHAR(50) NOT NULL,
+              available_count INT DEFAULT 0,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY date_vehicle (travel_date, vehicle_type)
+          )
+      `);
+      console.log("TaxiAvailabilityByDate table created successfully");
+    } else {
+      console.log("TaxiAvailabilityByDate table already exists");
+    }
+    
+    // Check if PastBookings table exists
+    const [pastBookingsTableExists] = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'PastBookings'
+    `);
+    
+    if (pastBookingsTableExists[0].count === 0) {
+      console.log("Creating PastBookings table...");
+      await pool.query(`
+          CREATE TABLE PastBookings (
+              booking_id INT PRIMARY KEY AUTO_INCREMENT,
+              user_id INT NOT NULL,
+              booking_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              travel_date DATE NOT NULL,
+              departure_time TIME,
+              vehicle_type VARCHAR(50) NOT NULL,
+              number_of_passengers INT NOT NULL,
+              pickup_location VARCHAR(255) NOT NULL,
+              drop_location VARCHAR(255) NOT NULL,
+              price DECIMAL(10,2) NOT NULL,
+              status VARCHAR(50) DEFAULT 'CONFIRMED',
+              travel_type VARCHAR(50) DEFAULT 'One Way',
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (user_id) REFERENCES User(user_id)
+          )
+      `);
+      console.log("PastBookings table created successfully");
+    } else {
+      console.log("PastBookings table already exists");
+    }
+    
+    // Check if BookingTaxis table exists
+    const [bookingTaxisTableExists] = await pool.query(`
+      SELECT COUNT(*) as count 
+      FROM information_schema.tables 
+      WHERE table_schema = DATABASE() 
+      AND table_name = 'BookingTaxis'
+    `);
+    
+    if (bookingTaxisTableExists[0].count === 0) {
+      console.log("Creating BookingTaxis table...");
+      await pool.query(`
+          CREATE TABLE BookingTaxis (
+              booking_id INT PRIMARY KEY AUTO_INCREMENT,
+              user_id INT NOT NULL,
+              booking_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              travel_date DATE NOT NULL,
+              departure_time TIME,
+              vehicle_type VARCHAR(50) NOT NULL,
+              number_of_passengers INT NOT NULL,
+              pickup_location VARCHAR(255) NOT NULL,
+              drop_location VARCHAR(255) NOT NULL,
+              price DECIMAL(10,2) NOT NULL,
+              status VARCHAR(50) DEFAULT 'CONFIRMED',
+              travel_type VARCHAR(50) DEFAULT 'One Way',
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (user_id) REFERENCES User(user_id)
+          )
+      `);
+      console.log("BookingTaxis table created successfully");
+    } else {
+      console.log("BookingTaxis table already exists");
+    }
+    
+    console.log("All tables checked/created successfully");
+    return { success: true, message: "Tables checked/created successfully" };
+  } catch (error) {
+    console.error("Error creating tables:", error);
+    return {
+      success: false,
+      message: "Failed to create tables",
+      error: error.message
+    };
+  }
+};
+
 // Update module exports
 module.exports = {
   createBooking,
@@ -873,5 +1196,7 @@ module.exports = {
   clearTableData,
   checkVehicleAvailability,
   getAvailableTaxis,
-  searchBookings
+  searchBookings,
+  dropAndRecreateTables,
+  createTablesIfNotExist
 };

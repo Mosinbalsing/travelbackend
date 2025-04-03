@@ -3,6 +3,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const adminLogin = async (credentials) => {
+    console.log("admin service ", credentials);
+    
     try {
         // Input validation
         if (!credentials.email || !credentials.password) {
@@ -14,7 +16,7 @@ const adminLogin = async (credentials) => {
 
         // Check if admin exists
         const [admins] = await pool.query(
-            'SELECT * FROM Admin WHERE email = ?',
+            'SELECT * FROM admin WHERE email = ?',
             [credentials.email]
         );
 

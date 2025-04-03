@@ -1,4 +1,4 @@
-const { registerUser,loginUser,getUserFromToken } = require("../services/userService");
+const { registerUser,loginUser,adminLogin,getUserFromToken } = require("../services/userService");
 const { UserModel } = require("../models/userModel"); // ✅ Import UserModel
 const { User } = require("../models/userModel"); // ✅ Import User model
 
@@ -30,25 +30,108 @@ const register = async (req, res) => {
 
 
 const login = async (req, res) => {
-    // ✅ Add login logic here
     const { email, password } = req.body;
-    console.log(email, password);
+    console.log("Login attempt for:", email);
     
     if (!email || !password) {
-        return res.status(400).json({ error: "Email and password are required" });
+        return res.status(400).json({ 
+            success: false,
+            error: "Email and password are required",
+            isAuthenticated: false,
+            isLoggedIn: false,
+            hasToken: false,
+            isAdmin: false
+        });
     }
+
     try {
         const response = await loginUser(email, password);
-        console.log(response);
+        console.log("Login response:", response);
         
         if (response.success) {
-            return res.status(201).json(response);
+            // Set token in response header
+            res.setHeader('Authorization', `Bearer ${response.data.token}`);
+            
+            return res.status(200).json({
+                ...response,
+                isAuthenticated: true,
+                isLoggedIn: true,
+                hasToken: true,
+                isAdmin: true
+            });
         } else {
-            return res.status(400).json(response);
+            return res.status(401).json({
+                ...response,
+                isAuthenticated: false,
+                isLoggedIn: false,
+                hasToken: false,
+                isAdmin: false
+            });
         }
     } catch (error) {
-        console.error("Registration Error:", error);
-        return res.status(500).json({ success: false, message: "Failed to login, please try again" });
+        console.error("Login Error:", error);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Login failed", 
+            error: error.message,
+            isAuthenticated: false,
+            isLoggedIn: false,
+            hasToken: false,
+            isAdmin: false
+        });
+    }
+};
+
+const adminLoginController = async (req, res) => {
+    const { email, password } = req.body;
+    console.log("Admin login attempt for:", email);
+    
+    if (!email || !password) {
+        return res.status(400).json({ 
+            success: false,
+            error: "Email and password are required",
+            isAuthenticated: false,
+            isLoggedIn: false,
+            hasToken: false,
+            isAdmin: false
+        });
+    }
+
+    try {
+        const response = await adminLogin(email, password);
+        console.log("Admin login response:", response);
+        
+        if (response.success) {
+            // Set token in response header
+            res.setHeader('Authorization', `Bearer ${response.data.token}`);
+            
+            return res.status(200).json({
+                ...response,
+                isAuthenticated: true,
+                isLoggedIn: true,
+                hasToken: true,
+                isAdmin: true
+            });
+        } else {
+            return res.status(401).json({
+                ...response,
+                isAuthenticated: false,
+                isLoggedIn: false,
+                hasToken: false,
+                isAdmin: false
+            });
+        }
+    } catch (error) {
+        console.error("Admin Login Error:", error);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Admin login failed", 
+            error: error.message,
+            isAuthenticated: false,
+            isLoggedIn: false,
+            hasToken: false,
+            isAdmin: false
+        });
     }
 };
 
@@ -113,4 +196,4 @@ const getUserByMobile = async (req, res) => {
     }
 };
 
-module.exports = { register , login , getUserFromTokencontroller, getUserByMobile };
+module.exports = { register , login , adminLoginController, getUserFromTokencontroller, getUserByMobile };

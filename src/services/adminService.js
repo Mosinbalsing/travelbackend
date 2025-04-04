@@ -71,6 +71,32 @@ const adminLogin = async (credentials) => {
     }
 };
 
+const verifyAdminToken = (token) => {
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret_here');
+        
+        // Check if the token is for an admin
+        if (decoded.role !== 'admin') {
+            return {
+                success: false,
+                message: "Unauthorized: Admin access required"
+            };
+        }
+
+        return {
+            success: true,
+            data: decoded
+        };
+    } catch (error) {
+        return {
+            success: false,
+            message: "Invalid or expired token",
+            error: error.message
+        };
+    }
+};
+
 module.exports = {
-    adminLogin
+    adminLogin,
+    verifyAdminToken
 }; 

@@ -11,18 +11,75 @@ const dropBookingsTable = async () => {
     }
 };
 
-const createTablesIfNotExist = async () => {
+const dropUserTable = async () => {
     try {
-        // First, create the users table
+        // Drop the user table if it exists
+        await pool.query('DROP TABLE IF EXISTS user');
+        console.log("✅ user table dropped successfully!");
+        
+        // Create the new user table with the correct schema
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS users (
-                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                username VARCHAR(255) NOT NULL,
+            CREATE TABLE user (
+                user_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 email VARCHAR(255) UNIQUE NOT NULL,
                 mobile VARCHAR(20) UNIQUE NOT NULL,
-                password VARCHAR(255) NOT NULL,
-                isAdmin BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        console.log("✅ user table created successfully!");
+    } catch (error) {
+        console.error("❌ Error with user table operations:", error);
+        throw error;
+    }
+};
+
+const dropUserColumns = async () => {
+    try {
+        // Check if columns exist before dropping them
+        const [columns] = await pool.query(`
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'User'
+        `);
+
+        const existingColumns = columns.map(col => col.COLUMN_NAME);
+
+        // Drop username column if it exists
+        if (existingColumns.includes('username')) {
+            await pool.query('ALTER TABLE User DROP COLUMN username');
+            console.log("✅ username column dropped successfully!");
+        }
+
+        // Drop password column if it exists
+        if (existingColumns.includes('password')) {
+            await pool.query('ALTER TABLE User DROP COLUMN password');
+            console.log("✅ password column dropped successfully!");
+        }
+
+        // Drop isAdmin column if it exists
+        if (existingColumns.includes('isAdmin')) {
+            await pool.query('ALTER TABLE User DROP COLUMN isAdmin');
+            console.log("✅ isAdmin column dropped successfully!");
+        }
+
+        console.log("✅ All specified columns dropped successfully!");
+    } catch (error) {
+        console.error("❌ Error dropping columns:", error);
+        throw error;
+    }
+};
+
+const createTablesIfNotExist = async () => {
+    try {
+        // First, create the Users table (note: Users not User)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS Users (
+                user_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                mobile VARCHAR(20) UNIQUE NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -63,7 +120,7 @@ const createTablesIfNotExist = async () => {
                 price DECIMAL(10,2),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                FOREIGN KEY (user_id) REFERENCES Users(user_id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
 
@@ -77,9 +134,9 @@ const createTablesIfNotExist = async () => {
 const initializeDatabase = async () => {
     try {
         // Drop existing tables if they exist
-        // await pool.query('DROP TABLE IF EXISTS BookingTaxis');
-        // await pool.query('DROP TABLE IF EXISTS AvailableTaxis');
-        // await pool.query('DROP TABLE IF EXISTS users');
+        await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+        await pool.query('DROP TABLE IF EXISTS AvailableTaxis');
+        await pool.query('DROP TABLE IF EXISTS Users'); // Note: Users not User
 
         // Create tables if they don't exist
         await createTablesIfNotExist();
@@ -107,9 +164,9 @@ const createAdminTable = async () => {
 
         // Insert default admin if not exists
         const defaultAdmin = {
-            email: 'sneha@gmail.com',
+            email: 'mosinbalsing@gmail.com',
             password: 'Admin123',
-            mobile: '9604064897'
+            mobile: '9730260479'
         };
 
         // Check if admin exists
@@ -132,13 +189,12 @@ const createAdminTable = async () => {
     }
 };
 
-
 const insertDefaultAdmin = async () => {
     try {
         const defaultAdmin = {
-            email: "sneha@gmail.com",
+            email: "mosinbalsing@gmail.com",
             password: "Admin123",
-            mobile: "9604064897"
+            mobile: "9730260479"
         };
 
         const [existing] = await pool.query("SELECT * FROM Admin WHERE email = ?", [defaultAdmin.email]);
@@ -155,11 +211,13 @@ const insertDefaultAdmin = async () => {
         throw error;
     }
 };
-insertDefaultAdmin()
+
 module.exports = { 
     insertDefaultAdmin,
     createTablesIfNotExist, 
     initializeDatabase,
     createAdminTable,
-    dropBookingsTable
+    dropBookingsTable,
+    dropUserColumns,
+    dropUserTable
 };

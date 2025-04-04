@@ -2,10 +2,12 @@ const express = require('express');
 const cors = require('cors');
 const { checkConnection } = require('./config/db');
 const { createTablesIfNotExist } = require('./services/bookingService');
+
 const authRoutes = require('./routes/authRoutes');
 const taxiRoutes = require('./routes/taxiRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const { createAdminTable } = require('./utils/dbUtils');
 
 const app = express();
 

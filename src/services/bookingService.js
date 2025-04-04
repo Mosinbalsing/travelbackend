@@ -44,14 +44,15 @@ const createBookingTable = async () => {
     await pool.query(`
             CREATE TABLE IF NOT EXISTS TaxiAvailabilityByDate (
                 id INT PRIMARY KEY AUTO_INCREMENT,
-                travel_date DATE,
-                vehicle_type VARCHAR(50),
+                travel_date DATE NOT NULL,
+                vehicle_type VARCHAR(50) NOT NULL,
                 pickup_location VARCHAR(100),
                 drop_location VARCHAR(100),
-                available_count INT,
+                available_count INT DEFAULT 0,
                 restoration_time DATETIME,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY date_vehicle (travel_date, vehicle_type)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
 
@@ -145,8 +146,7 @@ const createBooking = async (bookingData) => {
         ]
       );
 
-      // Update TaxiAvailabilityByDate for all bookings, not just same-day ones
-      // Check if there's already an entry for this date and vehicle type
+      // Update TaxiAvailabilityByDate for all bookings
       const [existingAvailability] = await pool.query(
         `SELECT * FROM TaxiAvailabilityByDate 
          WHERE travel_date = ? AND vehicle_type = ?`,
@@ -169,12 +169,32 @@ const createBooking = async (bookingData) => {
           [bookingData.pickupLocation, bookingData.dropLocation, restorationTime, bookingData.travelDate, bookingData.vehicleType]
         );
       } else {
-        // Create new entry
+        // Get total available count for this vehicle type
+        let checkColumn;
+        switch (bookingData.vehicleType) {
+          case "Sedan": checkColumn = "Sedan_Available"; break;
+          case "Hatchback": checkColumn = "Hatchback_Available"; break;
+          case "SUV": checkColumn = "SUV_Available"; break;
+          case "Prime_SUV": checkColumn = "Prime_SUV_Available"; break;
+        }
+
+        const [totalAvailable] = await pool.query(
+          `SELECT ${checkColumn} as total_count FROM AvailableTaxis LIMIT 1`
+        );
+
+        // Create new entry with total available count minus 1
         await pool.query(
           `INSERT INTO TaxiAvailabilityByDate 
            (travel_date, vehicle_type, pickup_location, drop_location, available_count, restoration_time)
-           VALUES (?, ?, ?, ?, -1, ?)`,
-          [bookingData.travelDate, bookingData.vehicleType, bookingData.pickupLocation, bookingData.dropLocation, restorationTime]
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            bookingData.travelDate,
+            bookingData.vehicleType,
+            bookingData.pickupLocation,
+            bookingData.dropLocation,
+            totalAvailable[0].total_count - 1,
+            restorationTime
+          ]
         );
       }
 
@@ -185,26 +205,6 @@ const createBooking = async (bookingData) => {
            SET ${checkColumn} = ${checkColumn} - 1
            WHERE pickup_location = ? AND drop_location = ?`,
           [bookingData.pickupLocation, bookingData.dropLocation]
-        );
-
-        const twoMinutesLater = new Date();
-        twoMinutesLater.setMinutes(twoMinutesLater.getMinutes() + 2);
-
-        await pool.query(
-          `INSERT INTO TaxiAvailabilityByDate 
-           (travel_date, vehicle_type, pickup_location,
-            drop_location, available_count, restoration_time)
-           VALUES (?, ?, ?, ?, 1, ?)
-           ON DUPLICATE KEY UPDATE 
-           restoration_time = ?`,
-          [
-            bookingData.travelDate,
-            bookingData.vehicleType,
-            bookingData.pickupLocation,
-            bookingData.dropLocation,
-            twoMinutesLater,
-            twoMinutesLater
-          ]
         );
       }
 
@@ -602,25 +602,6 @@ const checkVehicleAvailability = async (vehicleType, travelDate) => {
       [vehicleType, travelDate]
     );
 
-    // If there's a negative available_count, the vehicle is not available for this date
-    if (dateAvailability && dateAvailability.length > 0 && dateAvailability[0].available_count < 0) {
-      return {
-        available: false,
-        message: `Vehicle is not available for ${travelDate}`
-      };
-    }
-
-    // Check if vehicle is temporarily unavailable (within 2-minute window)
-    if (dateAvailability && dateAvailability.length > 0 && 
-        dateAvailability[0].restoration_time && 
-        new Date(dateAvailability[0].restoration_time) > new Date()) {
-      return {
-        available: false,
-        message: "Vehicle is temporarily unavailable",
-        nextAvailable: dateAvailability[0].restoration_time
-      };
-    }
-
     // Get total available count from AvailableTaxis
     const [totalAvailability] = await pool.query(
       `SELECT ${checkColumn} as total_count
@@ -649,11 +630,44 @@ const checkVehicleAvailability = async (vehicleType, travelDate) => {
 
     const currentBookedCount = bookedCount[0].booked_count;
 
-    // If all vehicles are booked for this date
+    // If there's a date-specific availability record
+    if (dateAvailability && dateAvailability.length > 0) {
+      const dateSpecificCount = dateAvailability[0].available_count;
+      
+      // If restoration time is set and in the future, vehicle is temporarily unavailable
+      if (dateAvailability[0].restoration_time && 
+          new Date(dateAvailability[0].restoration_time) > new Date()) {
+        return {
+          available: false,
+          message: "Vehicle is temporarily unavailable",
+          nextAvailable: dateAvailability[0].restoration_time
+        };
+      }
+
+      // Use the date-specific count if it's more restrictive
+      const effectiveAvailableCount = Math.min(totalCount - currentBookedCount, dateSpecificCount);
+      
+      if (effectiveAvailableCount <= 0) {
+        return {
+          available: false,
+          message: `No ${vehicleType} vehicles available for ${travelDate}`
+        };
+      }
+
+      return {
+        available: true,
+        message: `${effectiveAvailableCount} vehicles available for ${travelDate}`,
+        totalCount,
+        bookedCount: currentBookedCount,
+        dateSpecificCount
+      };
+    }
+
+    // If no date-specific record exists, use the general availability
     if (currentBookedCount >= totalCount) {
       return {
         available: false,
-        message: `All ${totalCount} vehicles are booked for ${travelDate}. Vehicle is not available for any route on this date.`
+        message: `All ${totalCount} vehicles are booked for ${travelDate}`
       };
     }
 
@@ -963,14 +977,15 @@ const dropAndRecreateTables = async () => {
     await pool.query(`
         CREATE TABLE TaxiAvailabilityByDate (
             id INT PRIMARY KEY AUTO_INCREMENT,
-            travel_date DATE,
-            vehicle_type VARCHAR(50),
+            travel_date DATE NOT NULL,
+            vehicle_type VARCHAR(50) NOT NULL,
             pickup_location VARCHAR(100),
             drop_location VARCHAR(100),
-            available_count INT,
+            available_count INT DEFAULT 0,
             restoration_time DATETIME,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY date_vehicle (travel_date, vehicle_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log("TaxiAvailabilityByDate table created successfully");
@@ -1097,8 +1112,12 @@ const createTablesIfNotExist = async () => {
               id INT PRIMARY KEY AUTO_INCREMENT,
               travel_date DATE NOT NULL,
               vehicle_type VARCHAR(50) NOT NULL,
+              pickup_location VARCHAR(100),
+              drop_location VARCHAR(100),
               available_count INT DEFAULT 0,
+              restoration_time DATETIME,
               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
               UNIQUE KEY date_vehicle (travel_date, vehicle_type)
           )
       `);

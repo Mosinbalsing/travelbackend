@@ -368,30 +368,37 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
 
             // 4. Move active bookings to PastBookings with cancelled status
             if (activeBookings.length > 0) {
+                // First, insert into PastBookings
                 await pool.execute(
                     `INSERT INTO PastBookings 
                      (booking_id, booking_date, travel_date, vehicle_type, 
                       number_of_passengers, pickup_location, drop_location, 
                       user_id, status)
-                     SELECT booking_id, booking_date, travel_date, vehicle_type,
-                            number_of_passengers, pickup_location, drop_location,
-                            user_id, 'cancelled'
+                     SELECT 
+                        booking_id, 
+                        booking_date, 
+                        travel_date, 
+                        vehicle_type,
+                        number_of_passengers, 
+                        pickup_location, 
+                        drop_location,
+                        user_id, 
+                        'cancelled'
                      FROM BookingTaxis
                      WHERE user_id = ? AND status = 'confirmed'`,
                     [userId]
                 );
 
-                // Delete the active bookings
+                // Then delete from BookingTaxis
                 await pool.execute(
                     'DELETE FROM BookingTaxis WHERE user_id = ? AND status = "confirmed"',
                     [userId]
                 );
             }
 
-            // 5. Drop and recreate DeletedUsers table without foreign key constraint
-            await pool.execute('DROP TABLE IF EXISTS DeletedUsers');
+            // 5. Check if DeletedUsers table exists, if not create it
             await pool.execute(`
-                CREATE TABLE DeletedUsers (
+                CREATE TABLE IF NOT EXISTS DeletedUsers (
                     deleted_user_id INT PRIMARY KEY AUTO_INCREMENT,
                     user_id INT,
                     name VARCHAR(100),

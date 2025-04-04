@@ -232,16 +232,12 @@ const mobileexist = async (mobile) => {
     }
 };
 
-const storeUserDetailsService = async (userDetails) => {
+const storeUserDetailsService = async (userData) => {
     try {
-        console.log("Storing user details:", userDetails);
-        const { name, email, mobile } = userDetails;
-
-        // Generate a username from email (part before @)
-        const username = email.split('@')[0];
-
+        const { name, email, mobile } = userData;
+        
         // Check if user already exists
-        const [existingUser] = await pool.query(
+        const [existingUser] = await pool.execute(
             'SELECT * FROM User WHERE mobile = ? OR email = ?',
             [mobile, email]
         );
@@ -254,30 +250,25 @@ const storeUserDetailsService = async (userDetails) => {
             };
         }
 
-        // Insert new user with username
-        const [result] = await pool.query(`
-            INSERT INTO User (username, name, email, mobile, password, isAdmin) 
-            VALUES (?, ?, ?, ?, ?, false)
-        `, [username, name, email, mobile, 'defaultpassword']);
+        // Insert user data with only the fields that exist in the table
+        const [result] = await pool.execute(`
+            INSERT INTO User (name, email, mobile) 
+            VALUES (?, ?, ?)
+        `, [name, email, mobile]);
 
         return {
             success: true,
             message: "User details stored successfully",
             data: {
                 user_id: result.insertId,
-                username,
                 name,
                 email,
                 mobile
             }
         };
     } catch (error) {
-        console.error("Error storing user details:", error);
-        return {
-            success: false,
-            message: "Failed to store user details",
-            error: error.message
-        };
+        console.error('Error storing user details:', error);
+        throw error;
     }
 };
 

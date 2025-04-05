@@ -99,7 +99,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
             pastBookingsMap[booking.user_id] = booking.past_bookings_count;
         });
         
-        // Get all bookings for each user (both active and past)
+        // Get all bookings for each user (both active and past) with price information
         const [allBookings] = await pool.execute(`
             SELECT 
                 b.booking_id,
@@ -111,12 +111,20 @@ router.get('/users', verifyAdmin, async (req, res) => {
                 b.drop_location,
                 b.status,
                 b.booking_date,
-                'active' as booking_type
+                'active' as booking_type,
+                CASE 
+                    WHEN b.vehicle_type = 'Sedan' THEN a.Sedan_Price
+                    WHEN b.vehicle_type = 'Hatchback' THEN a.Hatchback_Price
+                    WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
+                    WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
+                END as price
             FROM bookingtaxis b
+            LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
+                AND b.drop_location = a.drop_location
             ORDER BY b.travel_date DESC
         `);
         
-        // Get past bookings for each user
+        // Get past bookings for each user with price information
         const [pastBookingsData] = await pool.execute(`
             SELECT 
                 pb.booking_id,
@@ -128,8 +136,17 @@ router.get('/users', verifyAdmin, async (req, res) => {
                 pb.drop_location,
                 pb.status,
                 pb.booking_date,
-                'past' as booking_type
+                'past' as booking_type,
+                CASE 
+                    WHEN pb.vehicle_type = 'Sedan' THEN a.Sedan_Price
+                    WHEN pb.vehicle_type = 'Hatchback' THEN a.Hatchback_Price
+                    WHEN pb.vehicle_type = 'SUV' THEN a.SUV_Price
+                    WHEN pb.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
+                END as price
             FROM pastbookings pb
+            LEFT JOIN AvailableTaxis a ON pb.pickup_location = a.pickup_location 
+                AND pb.drop_location = a.drop_location
+            WHERE pb.user_id IS NOT NULL
             ORDER BY pb.travel_date DESC
         `);
         
@@ -234,7 +251,7 @@ router.get('/bookings', verifyAdmin, async (req, res) => {
     try {
         console.log('Fetching bookings from database...');
         
-        // Fetch booking data with user details
+        // Fetch booking data with user details and price information
         const [bookings] = await pool.execute(`
             SELECT 
                 b.booking_id,
@@ -247,9 +264,17 @@ router.get('/bookings', verifyAdmin, async (req, res) => {
                 b.booking_date,
                 u.name as user_name,
                 u.email as user_email,
-                u.mobile as user_mobile
+                u.mobile as user_mobile,
+                CASE 
+                    WHEN b.vehicle_type = 'Sedan' THEN a.Sedan_Price
+                    WHEN b.vehicle_type = 'Hatchback' THEN a.Hatchback_Price
+                    WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
+                    WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
+                END as price
             FROM bookingtaxis b
             LEFT JOIN User u ON b.user_id = u.user_id
+            LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
+                AND b.drop_location = a.drop_location
             ORDER BY b.booking_date DESC
         `);
         
@@ -276,7 +301,7 @@ router.get('/pastbookings', verifyAdmin, async (req, res) => {
     try {
         console.log('Fetching past bookings from database...');
         
-        // Fetch booking data with user details
+        // Fetch booking data with user details and price information
         const [pastbookings] = await pool.execute(`
             SELECT 
                 b.booking_id,
@@ -288,11 +313,19 @@ router.get('/pastbookings', verifyAdmin, async (req, res) => {
                 b.travel_date,
                 b.booking_date,
                 b.number_of_passengers,
-                u.name as user_name,
-                u.email as user_email,
-                u.mobile as user_mobile
+                COALESCE(u.name, 'Deleted User') as user_name,
+                COALESCE(u.email, 'N/A') as user_email,
+                COALESCE(u.mobile, 'N/A') as user_mobile,
+                CASE 
+                    WHEN b.vehicle_type = 'Sedan' THEN a.Sedan_Price
+                    WHEN b.vehicle_type = 'Hatchback' THEN a.Hatchback_Price
+                    WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
+                    WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
+                END as price
             FROM PastBookings b
             LEFT JOIN User u ON b.user_id = u.user_id
+            LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
+                AND b.drop_location = a.drop_location
             ORDER BY b.booking_date DESC
         `);
         
@@ -309,6 +342,57 @@ router.get('/pastbookings', verifyAdmin, async (req, res) => {
         return res.status(500).json({ 
             success: false, 
             message: 'Failed to fetch past bookings',
+            error: error.message
+        });
+    }
+});
+
+// Get past bookings with deleted users
+router.get('/deleted-user-bookings', verifyAdmin, async (req, res) => {
+    try {
+        console.log('Fetching past bookings with deleted users...');
+        
+        // Fetch booking data with price information for deleted users
+        const [deletedUserBookings] = await pool.execute(`
+            SELECT 
+                b.booking_id,
+                b.vehicle_type,
+                b.pickup_location,
+                b.drop_location,
+                b.status,
+                b.user_id,
+                b.travel_date,
+                b.booking_date,
+                b.number_of_passengers,
+                'Deleted User' as user_name,
+                'N/A' as user_email,
+                'N/A' as user_mobile,
+                CASE 
+                    WHEN b.vehicle_type = 'Sedan' THEN a.Sedan_Price
+                    WHEN b.vehicle_type = 'Hatchback' THEN a.Hatchback_Price
+                    WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
+                    WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
+                END as price
+            FROM PastBookings b
+            LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
+                AND b.drop_location = a.drop_location
+            WHERE b.user_id IS NULL
+            ORDER BY b.booking_date DESC
+        `);
+        
+        console.log(`Successfully fetched ${deletedUserBookings.length} bookings with deleted users`);
+        
+        // Send response
+        return res.json({ 
+            success: true, 
+            data: deletedUserBookings,
+            count: deletedUserBookings.length
+        });
+    } catch (error) {
+        console.error('Error in deleted-user-bookings route:', error);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Failed to fetch bookings with deleted users',
             error: error.message
         });
     }
@@ -368,14 +452,13 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
 
             // 4. Move active bookings to PastBookings with cancelled status
             if (activeBookings.length > 0) {
-                // First, insert into PastBookings
+                // First, insert into PastBookings without copying the booking_id
                 await pool.execute(
                     `INSERT INTO PastBookings 
-                     (booking_id, booking_date, travel_date, vehicle_type, 
+                     (booking_date, travel_date, vehicle_type, 
                       number_of_passengers, pickup_location, drop_location, 
                       user_id, status)
                      SELECT 
-                        booking_id, 
                         booking_date, 
                         travel_date, 
                         vehicle_type,

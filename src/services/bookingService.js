@@ -65,6 +65,8 @@ const createBookingTable = async () => {
 
 const createBooking = async (bookingData) => {
   try {
+    console.log("Creating booking...", bookingData);
+    
     await createBookingTable();
     
     const validVehicleTypes = ["Sedan", "Hatchback", "SUV", "Prime_SUV"];
@@ -133,8 +135,8 @@ const createBooking = async (bookingData) => {
         `INSERT INTO BookingTaxis (
           booking_date, travel_date, vehicle_type,
           number_of_passengers, pickup_location,
-          drop_location, user_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
+          drop_location, user_id, departure_time, price,status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed')`,
         [
           currentDateTime,
           bookingData.travelDate,
@@ -142,7 +144,9 @@ const createBooking = async (bookingData) => {
           bookingData.numberOfPassengers || 1,
           bookingData.pickupLocation,
           bookingData.dropLocation,
-          userId
+          userId,
+          bookingData.departureTime,
+          bookingData.price
         ]
       );
 

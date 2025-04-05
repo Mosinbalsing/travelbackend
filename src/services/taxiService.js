@@ -124,7 +124,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
             }
         });
 
-        // Add vehicles with actual available counts
+        // Add vehicles with actual available counts and prices
         if (row.actual_sedan_available > 0) {
             availableVehicles.push({
                 type: 'Sedan',
@@ -132,7 +132,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 availableCount: row.actual_sedan_available,
                 totalCount: row.Sedan_Available,
                 bookedCount: row.sedan_booked_count,
-                message: `${row.actual_sedan_available} out of ${row.Sedan_Available} Sedans available`
+                message: `${row.actual_sedan_available} out of ${row.Sedan_Available} Sedans available for ₹${row.Sedan_Price}`
             });
         }
 
@@ -143,7 +143,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 availableCount: row.actual_hatchback_available,
                 totalCount: row.Hatchback_Available,
                 bookedCount: row.hatchback_booked_count,
-                message: `${row.actual_hatchback_available} out of ${row.Hatchback_Available} Hatchbacks available`
+                message: `${row.actual_hatchback_available} out of ${row.Hatchback_Available} Hatchbacks available for ₹${row.Hatchback_Price}`
             });
         }
 
@@ -154,7 +154,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 availableCount: row.actual_suv_available,
                 totalCount: row.SUV_Available,
                 bookedCount: row.suv_booked_count,
-                message: `${row.actual_suv_available} out of ${row.SUV_Available} SUVs available`
+                message: `${row.actual_suv_available} out of ${row.SUV_Available} SUVs available for ₹${row.SUV_Price}`
             });
         }
 
@@ -165,7 +165,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 availableCount: row.actual_prime_suv_available,
                 totalCount: row.Prime_SUV_Available,
                 bookedCount: row.prime_suv_booked_count,
-                message: `${row.actual_prime_suv_available} out of ${row.Prime_SUV_Available} Prime SUVs available`
+                message: `${row.actual_prime_suv_available} out of ${row.Prime_SUV_Available} Prime SUVs available for ₹${row.Prime_SUV_Price}`
             });
         }
 
@@ -180,7 +180,13 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
                 dropLocation: row.drop_location,
                 availableDate: date,
                 availableVehicles: availableVehicles,
-                currentBookings: bookings
+                currentBookings: bookings,
+                prices: {
+                    Sedan: Number(row.Sedan_Price),
+                    Hatchback: Number(row.Hatchback_Price),
+                    SUV: Number(row.SUV_Price),
+                    Prime_SUV: Number(row.Prime_SUV_Price)
+                }
             }
         };
     } catch (error) {

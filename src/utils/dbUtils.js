@@ -212,6 +212,26 @@ const insertDefaultAdmin = async () => {
     }
 };
 
+const createUserDeletedTable = async () => {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS userDeleted (
+                user_id INT UNSIGNED PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                mobile VARCHAR(20) NOT NULL,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        console.log("✅ userDeleted table created successfully!");
+    } catch (error) {
+        console.error("❌ Error creating userDeleted table:", error);
+        throw error;
+    }
+};
+
 module.exports = { 
     insertDefaultAdmin,
     createTablesIfNotExist, 
@@ -219,5 +239,6 @@ module.exports = {
     createAdminTable,
     dropBookingsTable,
     dropUserColumns,
-    dropUserTable
+    dropUserTable,
+    createUserDeletedTable
 };

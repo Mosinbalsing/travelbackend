@@ -7,7 +7,7 @@ const authRoutes = require('./routes/authRoutes');
 const taxiRoutes = require('./routes/taxiRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const adminRoutes = require('./routes/adminRoutes');
-const { createAdminTable } = require('./utils/dbUtils');
+const { createAdminTable, createUserDeletedTable } = require('./utils/dbUtils');
 
 const app = express();
 
@@ -39,6 +39,10 @@ const startServer = async () => {
         // Create tables if they don't exist
         await createTablesIfNotExist();
         console.log("Tables checked/created successfully");
+        
+        // Create userDeleted table
+        await createUserDeletedTable();
+        console.log("userDeleted table checked/created successfully");
 
         const PORT = process.env.PORT || 3000;
         app.listen(PORT, () => {

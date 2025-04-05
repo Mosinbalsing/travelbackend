@@ -178,9 +178,8 @@ router.get('/users', verifyAdmin, async (req, res) => {
         
         return res.json({ 
             success: true, 
-            data: usersWithBookings,
-            count: usersWithBookings.length,
-            total_bookings: totalBookingsCount
+            data: users,
+            count: users.length
         });
     } catch (error) {
         console.error('Error in user-get route:', error);
@@ -521,37 +520,37 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
             );
 
             // Commit the transaction
-            await pool.query('COMMIT');
+            await connection.commit();
 
             return res.json({
                 success: true,
                 message: "User deleted successfully",
                 data: {
-                    deletedUser: {
-                        user_id: user.user_id,
-                        name: user.name,
-                        email: user.email,
-                        mobile: user.mobile,
-                        deleted_at: new Date(),
-                        reason: reason,
-                        deleted_by: adminEmail
-                    },
-                    cancelledBookings: activeBookings.length
+                    user_id: userToDelete.user_id,
+                    name: userToDelete.name,
+                    email: userToDelete.email,
+                    mobile: userToDelete.mobile
                 }
             });
-
         } catch (error) {
-            // Rollback in case of any error
-            await pool.query('ROLLBACK');
+            // Rollback the transaction in case of error
+            if (connection) {
+                await connection.rollback();
+            }
             throw error;
         }
     } catch (error) {
-        console.error('Error in delete user route:', error);
+        console.error('Error deleting user:', error);
         return res.status(500).json({
             success: false,
             message: "Failed to delete user",
             error: error.message
         });
+    } finally {
+        // Release the connection back to the pool
+        if (connection) {
+            connection.release();
+        }
     }
 });
 

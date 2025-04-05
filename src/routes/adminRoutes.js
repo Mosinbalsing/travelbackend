@@ -223,60 +223,6 @@ router.get('/pastbookings', verifyAdmin, async (req, res) => {
     }
 });
 
-<<<<<<< HEAD
-// Delete user and store in userDeleted table
-router.post('/deleteuser', verifyAdmin, async (req, res) => {
-    let connection;
-    try {
-        const { user_id } = req.body;
-        const userId = user_id;
-        console.log(req.body);
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: "User ID is required"
-            });
-        }
-
-        // Get a connection from the pool
-        connection = await pool.getConnection();
-
-        // Check if user exists
-        const [existingUsers] = await connection.execute(
-            'SELECT * FROM user WHERE user_id = ?',
-            [userId]
-        );
-
-        if (existingUsers.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found"
-            });
-        }
-
-        const userToDelete = existingUsers[0];
-
-        // Start a transaction
-        await connection.beginTransaction();
-
-        try {
-            // Insert user data into userDeleted table
-            await connection.execute(
-                'INSERT INTO userDeleted (user_id, name, email, mobile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-                [
-                    userToDelete.user_id,
-                    userToDelete.name,
-                    userToDelete.email,
-                    userToDelete.mobile,
-                    userToDelete.created_at,
-                    userToDelete.updated_at
-                ]
-            );
-
-            // Delete user from user table
-            await connection.execute(
-                'DELETE FROM user WHERE user_id = ?',
-=======
 // Delete user and handle related operations
 router.delete('/users/:userId', verifyAdmin, async (req, res) => {
     try {
@@ -397,7 +343,6 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
             // 8. Delete the user
             await pool.execute(
                 'DELETE FROM User WHERE user_id = ?',
->>>>>>> 3d61de29f2d973c95371e2d3b12d42b7354019b7
                 [userId]
             );
 

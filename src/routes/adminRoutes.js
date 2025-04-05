@@ -67,103 +67,12 @@ router.post('/login', async (req, res) => {
 // Get all users
 router.get('/users', verifyAdmin, async (req, res) => {
     try {
-        // Get users with their booking counts
-        const [users] = await pool.execute(`
-            SELECT 
-                u.user_id,
-                u.name,
-                u.email,
-                u.mobile,
-                u.created_at,
-                u.updated_at,
-                COUNT(DISTINCT b.booking_id) as total_bookings,
-                COUNT(DISTINCT CASE WHEN b.status = 'pending' OR b.status = 'confirmed' THEN b.booking_id END) as active_bookings
-            FROM user u
-            LEFT JOIN bookingtaxis b ON u.user_id = b.user_id
-            GROUP BY u.user_id, u.name, u.email, u.mobile, u.created_at, u.updated_at
-            ORDER BY u.created_at DESC
-        `);
-        
-        // Get past bookings count for each user
-        const [pastBookings] = await pool.execute(`
-            SELECT 
-                user_id,
-                COUNT(*) as past_bookings_count
-            FROM pastbookings
-            GROUP BY user_id
-        `);
-        
-        // Create a map of user_id to past bookings count
-        const pastBookingsMap = {};
-        pastBookings.forEach(booking => {
-            pastBookingsMap[booking.user_id] = booking.past_bookings_count;
-        });
-        
-        // Get all bookings for each user (both active and past)
-        const [allBookings] = await pool.execute(`
-            SELECT 
-                b.booking_id,
-                b.user_id,
-                b.travel_date,
-                b.vehicle_type,
-                b.number_of_passengers,
-                b.pickup_location,
-                b.drop_location,
-                b.status,
-                b.booking_date,
-                'active' as booking_type
-            FROM bookingtaxis b
-            ORDER BY b.travel_date DESC
-        `);
-        
-        // Get past bookings for each user
-        const [pastBookingsData] = await pool.execute(`
-            SELECT 
-                pb.booking_id,
-                pb.user_id,
-                pb.travel_date,
-                pb.vehicle_type,
-                pb.number_of_passengers,
-                pb.pickup_location,
-                pb.drop_location,
-                pb.status,
-                pb.booking_date,
-                'past' as booking_type
-            FROM pastbookings pb
-            ORDER BY pb.travel_date DESC
-        `);
-        
-        // Combine all bookings
-        const allBookingsData = [...allBookings, ...pastBookingsData];
-        
-        // Group bookings by user_id
-        const bookingsMap = {};
-        allBookingsData.forEach(booking => {
-            if (!bookingsMap[booking.user_id]) {
-                bookingsMap[booking.user_id] = [];
-            }
-            bookingsMap[booking.user_id].push(booking);
-        });
-        
-        // Calculate total bookings across all users
-        const totalBookingsCount = users.reduce((total, user) => {
-            return total + parseInt(user.total_bookings) + (pastBookingsMap[user.user_id] || 0);
-        }, 0);
-        
-        // Add booking data to each user
-        const usersWithBookings = users.map(user => ({
-            ...user,
-            total_bookings: parseInt(user.total_bookings) + (pastBookingsMap[user.user_id] || 0),
-            active_bookings: parseInt(user.active_bookings),
-            past_bookings: pastBookingsMap[user.user_id] || 0,
-            all_bookings: bookingsMap[user.user_id] || []
-        }));
+        const [users] = await pool.execute('SELECT user_id, name, email, mobile FROM user');
         
         return res.json({ 
             success: true, 
-            data: usersWithBookings,
-            count: usersWithBookings.length,
-            total_bookings: totalBookingsCount
+            data: users,
+            count: users.length
         });
     } catch (error) {
         console.error('Error in user-get route:', error);
@@ -311,6 +220,96 @@ router.get('/pastbookings', verifyAdmin, async (req, res) => {
             message: 'Failed to fetch past bookings',
             error: error.message
         });
+    }
+});
+
+// Delete user and store in userDeleted table
+router.post('/deleteuser', verifyAdmin, async (req, res) => {
+    let connection;
+    try {
+        const { user_id } = req.body;
+        const userId = user_id;
+        console.log(req.body);
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "User ID is required"
+            });
+        }
+
+        // Get a connection from the pool
+        connection = await pool.getConnection();
+
+        // Check if user exists
+        const [existingUsers] = await connection.execute(
+            'SELECT * FROM user WHERE user_id = ?',
+            [userId]
+        );
+
+        if (existingUsers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        const userToDelete = existingUsers[0];
+
+        // Start a transaction
+        await connection.beginTransaction();
+
+        try {
+            // Insert user data into userDeleted table
+            await connection.execute(
+                'INSERT INTO userDeleted (user_id, name, email, mobile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [
+                    userToDelete.user_id,
+                    userToDelete.name,
+                    userToDelete.email,
+                    userToDelete.mobile,
+                    userToDelete.created_at,
+                    userToDelete.updated_at
+                ]
+            );
+
+            // Delete user from user table
+            await connection.execute(
+                'DELETE FROM user WHERE user_id = ?',
+                [userId]
+            );
+
+            // Commit the transaction
+            await connection.commit();
+
+            return res.json({
+                success: true,
+                message: "User deleted successfully",
+                data: {
+                    user_id: userToDelete.user_id,
+                    name: userToDelete.name,
+                    email: userToDelete.email,
+                    mobile: userToDelete.mobile
+                }
+            });
+        } catch (error) {
+            // Rollback the transaction in case of error
+            if (connection) {
+                await connection.rollback();
+            }
+            throw error;
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete user",
+            error: error.message
+        });
+    } finally {
+        // Release the connection back to the pool
+        if (connection) {
+            connection.release();
+        }
     }
 });
 

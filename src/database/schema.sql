@@ -41,14 +41,15 @@ CREATE TABLE IF NOT EXISTS BookingTaxis (
 -- Create TaxiAvailabilityByDate table
 CREATE TABLE IF NOT EXISTS TaxiAvailabilityByDate (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    travel_date DATE,
-    vehicle_type VARCHAR(50),
+    travel_date DATE NOT NULL,
+    vehicle_type VARCHAR(50) NOT NULL,
     pickup_location VARCHAR(100),
     drop_location VARCHAR(100),
-    available_count INT,
+    available_count INT DEFAULT 0,
     restoration_time DATETIME,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY date_vehicle (travel_date, vehicle_type)
 );
 
 -- Create PastBookings table

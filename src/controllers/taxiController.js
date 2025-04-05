@@ -72,7 +72,7 @@ const storeUserDetails = async (req, res) => {
     try {
         console.log("Taxi Controller req.body", req.body);
         
-        // Extract user details from request body
+        // Extract user details from the nested mobile object
         const userDetails = {
             name: req.body.mobile.name,
             email: req.body.mobile.email,

@@ -238,13 +238,18 @@ const mobileexist = async (mobile) => {
     }
 };
 
-const storeUserDetailsService = async (userDetails) => {
+const storeUserDetailsService = async (userData) => {
     try {
+<<<<<<< HEAD
         console.log("Storing user details:", userDetails);
         const { name, email, mobile } = userDetails;
 
+=======
+        const { name, email, mobile } = userData;
+        
+>>>>>>> 3d61de29f2d973c95371e2d3b12d42b7354019b7
         // Check if user already exists
-        const [existingUser] = await pool.query(
+        const [existingUser] = await pool.execute(
             'SELECT * FROM User WHERE mobile = ? OR email = ?',
             [mobile, email]
         );
@@ -257,8 +262,13 @@ const storeUserDetailsService = async (userDetails) => {
             };
         }
 
+<<<<<<< HEAD
         // Insert new user without username field
         const [result] = await pool.query(`
+=======
+        // Insert user data with only the fields that exist in the table
+        const [result] = await pool.execute(`
+>>>>>>> 3d61de29f2d973c95371e2d3b12d42b7354019b7
             INSERT INTO User (name, email, mobile) 
             VALUES (?, ?, ?)
         `, [name, email, mobile]);
@@ -274,12 +284,8 @@ const storeUserDetailsService = async (userDetails) => {
             }
         };
     } catch (error) {
-        console.error("Error storing user details:", error);
-        return {
-            success: false,
-            message: "Failed to store user details",
-            error: error.message
-        };
+        console.error('Error storing user details:', error);
+        throw error;
     }
 };
 

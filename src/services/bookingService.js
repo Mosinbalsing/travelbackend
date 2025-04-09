@@ -1214,7 +1214,21 @@ const cancelBooking = async (bookingId) => {
     await pool.query('START TRANSACTION');
 
     try {
-      // Get the booking details
+      // First check if it's a past booking
+      const [pastBookings] = await pool.query(
+        'SELECT * FROM PastBookings WHERE booking_id = ?',
+        [bookingId]
+      );
+
+      if (pastBookings.length > 0) {
+        await pool.query('ROLLBACK');
+        return {
+          success: false,
+          message: "This is a past booking that has already been completed or cancelled"
+        };
+      }
+
+      // Get the booking details from BookingTaxis
       const [bookings] = await pool.query(
         'SELECT * FROM BookingTaxis WHERE booking_id = ? AND status = "confirmed"',
         [bookingId]
@@ -1230,7 +1244,47 @@ const cancelBooking = async (bookingId) => {
 
       const booking = bookings[0];
 
-      // Move booking to PastBookings with cancelled status
+      // Check if it's a past booking (travel date is before today)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const travelDate = new Date(booking.travel_date);
+      travelDate.setHours(0, 0, 0, 0);
+
+      if (travelDate < today) {
+        // For past bookings, move to PastBookings with 'completed' status
+        await pool.query(
+          `INSERT INTO PastBookings (
+            booking_id, booking_date, travel_date, vehicle_type,
+            number_of_passengers, pickup_location, drop_location,
+            user_id, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')`,
+          [
+            booking.booking_id,
+            booking.booking_date,
+            booking.travel_date,
+            booking.vehicle_type,
+            booking.number_of_passengers,
+            booking.pickup_location,
+            booking.drop_location,
+            booking.user_id
+          ]
+        );
+
+        // Delete from BookingTaxis
+        await pool.query(
+          'DELETE FROM BookingTaxis WHERE booking_id = ?',
+          [bookingId]
+        );
+
+        await pool.query('COMMIT');
+
+        return {
+          success: false,
+          message: "This is a past booking that has been marked as completed"
+        };
+      }
+
+      // For current/future bookings, proceed with cancellation
       await pool.query(
         `INSERT INTO PastBookings (
           booking_id, booking_date, travel_date, vehicle_type,
@@ -1257,8 +1311,6 @@ const cancelBooking = async (bookingId) => {
       );
 
       // For same-day bookings, also update AvailableTaxis table
-      const today = new Date();
-      const travelDate = new Date(booking.travel_date);
       if (travelDate.toDateString() === today.toDateString()) {
         let checkColumn;
         switch (booking.vehicle_type) {

@@ -1208,6 +1208,107 @@ const createTablesIfNotExist = async () => {
   }
 };
 
+const cancelBooking = async (bookingId) => {
+  try {
+    // Start a transaction
+    await pool.query('START TRANSACTION');
+
+    try {
+      // Get the booking details
+      const [bookings] = await pool.query(
+        'SELECT * FROM BookingTaxis WHERE booking_id = ? AND status = "confirmed"',
+        [bookingId]
+      );
+
+      if (bookings.length === 0) {
+        await pool.query('ROLLBACK');
+        return {
+          success: false,
+          message: "Booking not found or already cancelled/completed"
+        };
+      }
+
+      const booking = bookings[0];
+
+      // Move booking to PastBookings with cancelled status
+      await pool.query(
+        `INSERT INTO PastBookings (
+          booking_id, booking_date, travel_date, vehicle_type,
+          number_of_passengers, pickup_location, drop_location,
+          user_id, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')`,
+        [
+          booking.booking_id,
+          booking.booking_date,
+          booking.travel_date,
+          booking.vehicle_type,
+          booking.number_of_passengers,
+          booking.pickup_location,
+          booking.drop_location,
+          booking.user_id
+        ]
+      );
+
+      // Delete from TaxiAvailabilityByDate
+      await pool.query(
+        `DELETE FROM TaxiAvailabilityByDate 
+         WHERE travel_date = ? AND vehicle_type = ?`,
+        [booking.travel_date, booking.vehicle_type]
+      );
+
+      // For same-day bookings, also update AvailableTaxis table
+      const today = new Date();
+      const travelDate = new Date(booking.travel_date);
+      if (travelDate.toDateString() === today.toDateString()) {
+        let checkColumn;
+        switch (booking.vehicle_type) {
+          case "Sedan": checkColumn = "Sedan_Available"; break;
+          case "Hatchback": checkColumn = "Hatchback_Available"; break;
+          case "SUV": checkColumn = "SUV_Available"; break;
+          case "Prime_SUV": checkColumn = "Prime_SUV_Available"; break;
+        }
+
+        await pool.query(
+          `UPDATE AvailableTaxis 
+           SET ${checkColumn} = ${checkColumn} + 1
+           WHERE pickup_location = ? AND drop_location = ?`,
+          [booking.pickup_location, booking.drop_location]
+        );
+      }
+
+      // Delete from BookingTaxis
+      await pool.query(
+        'DELETE FROM BookingTaxis WHERE booking_id = ?',
+        [bookingId]
+      );
+
+      await pool.query('COMMIT');
+
+      return {
+        success: true,
+        message: "Booking cancelled successfully",
+        data: {
+          bookingId: booking.booking_id,
+          travelDate: booking.travel_date,
+          vehicleType: booking.vehicle_type,
+          pickupLocation: booking.pickup_location,
+          dropLocation: booking.drop_location
+        }
+      };
+    } catch (error) {
+      await pool.query('ROLLBACK');
+      throw error;
+    }
+  } catch (error) {
+    console.error("Error cancelling booking:", error);
+    return {
+      success: false,
+      message: "Failed to cancel booking",
+      error: error.message
+    };
+  }
+};
+
 // Update module exports
 module.exports = {
   createBooking,
@@ -1221,5 +1322,6 @@ module.exports = {
   getAvailableTaxis,
   searchBookings,
   dropAndRecreateTables,
-  createTablesIfNotExist
+  createTablesIfNotExist,
+  cancelBooking
 };

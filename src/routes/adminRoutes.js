@@ -527,23 +527,6 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
                 success: true,
                 message: "User deleted successfully",
                 data: {
-<<<<<<< HEAD
-                    user_id: userToDelete.user_id,
-                    name: userToDelete.name,
-                    email: userToDelete.email,
-                    mobile: userToDelete.mobile
-                }
-            });
-        } catch (error) {
-            // Rollback the transaction in case of error
-            if (connection) {
-                await connection.rollback();
-            }
-            throw error;
-        }
-    } catch (error) {
-        console.error('Error deleting user:', error);
-=======
                     deletedUser: {
                         user_id: user.user_id,
                         name: user.name,
@@ -564,20 +547,16 @@ router.delete('/users/:userId', verifyAdmin, async (req, res) => {
         }
     } catch (error) {
         console.error('Error in delete user route:', error);
->>>>>>> 3d61de29f2d973c95371e2d3b12d42b7354019b7
         return res.status(500).json({
             success: false,
             message: "Failed to delete user",
             error: error.message
         });
-<<<<<<< HEAD
     } finally {
         // Release the connection back to the pool
         if (connection) {
             connection.release();
         }
-=======
->>>>>>> 3d61de29f2d973c95371e2d3b12d42b7354019b7
     }
 });
 

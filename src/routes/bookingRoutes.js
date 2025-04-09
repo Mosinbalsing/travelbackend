@@ -12,6 +12,27 @@ router.post('/create-booking', createBookingDetails);
 // Search bookings route
 router.post('/search', searchBookingsController);
 
+// Cancel booking route
+router.post('/cancel/:bookingId', async (req, res) => {
+  try {
+    const bookingId = req.params.bookingId;
+    const result = await bookingService.cancelBooking(bookingId);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('Error canceling booking:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel booking',
+      error: error.message
+    });
+  }
+});
+
 // Add new route for clearing table data
 router.post('/clear-data', async (req, res) => {
   try {

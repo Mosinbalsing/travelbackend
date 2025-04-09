@@ -1209,157 +1209,146 @@ const createTablesIfNotExist = async () => {
 };
 
 const cancelBooking = async (bookingId) => {
+  console.log("Cancelling booking with ID:", bookingId);
+
   try {
-    // Start a transaction
     await pool.query('START TRANSACTION');
 
-    try {
-      // First check if it's a past booking
-      const [pastBookings] = await pool.query(
-        'SELECT * FROM PastBookings WHERE booking_id = ?',
-        [bookingId]
-      );
+    // Step 1: Check if already cancelled or completed in PastBookings
+    const [pastBookings] = await pool.query(
+      'SELECT * FROM PastBookings WHERE booking_id = ?',
+      [bookingId]
+    );
 
-      if (pastBookings.length > 0) {
-        await pool.query('ROLLBACK');
-        return {
-          success: false,
-          message: "This is a past booking that has already been completed or cancelled"
-        };
-      }
+    if (pastBookings.length > 0) {
+      await pool.query('ROLLBACK');
+      return {
+        success: true,
+        status: 'already_processed',
+        message: "This booking has already been processed (completed or cancelled)",
+        data: {
+          bookingId: pastBookings[0].booking_id,
+          status: pastBookings[0].status
+        }
+      };
+    }
 
-      // Get the booking details from BookingTaxis
-      const [bookings] = await pool.query(
-        'SELECT * FROM BookingTaxis WHERE booking_id = ? AND status = "confirmed"',
-        [bookingId]
-      );
+    // Step 2: Get booking from BookingTaxis
+    const [bookings] = await pool.query(
+      'SELECT * FROM BookingTaxis WHERE booking_id = ? AND Status = "confirmed"',
+      [bookingId]
+    );
 
-      if (bookings.length === 0) {
-        await pool.query('ROLLBACK');
-        return {
-          success: false,
-          message: "Booking not found or already cancelled/completed"
-        };
-      }
+    if (bookings.length === 0) {
+      await pool.query('ROLLBACK');
+      return {
+        success: true,
+        status: 'not_found',
+        message: "Booking not found or already cancelled/completed"
+      };
+    }
 
-      const booking = bookings[0];
+    const booking = bookings[0];
 
-      // Check if it's a past booking (travel date is before today)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const travelDate = new Date(booking.travel_date);
-      travelDate.setHours(0, 0, 0, 0);
+    // Step 3: First update status to 'cancelled' in BookingTaxis
+    const [updateResult] = await pool.query(
+      'UPDATE BookingTaxis SET Status = ? WHERE booking_id = ?',
+      ['cancelled', bookingId]
+    );
+    console.log("Booking status updated:", updateResult);
 
-      if (travelDate < today) {
-        // For past bookings, move to PastBookings with 'completed' status
-        await pool.query(
-          `INSERT INTO PastBookings (
-            booking_id, booking_date, travel_date, vehicle_type,
-            number_of_passengers, pickup_location, drop_location,
-            user_id, status
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')`,
-          [
-            booking.booking_id,
-            booking.booking_date,
-            booking.travel_date,
-            booking.vehicle_type,
-            booking.number_of_passengers,
-            booking.pickup_location,
-            booking.drop_location,
-            booking.user_id
-          ]
-        );
+    // Step 4: Check if travel date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const travelDate = new Date(booking.travel_date);
+    travelDate.setHours(0, 0, 0, 0);
 
-        // Delete from BookingTaxis
-        await pool.query(
-          'DELETE FROM BookingTaxis WHERE booking_id = ?',
-          [bookingId]
-        );
+    // Step 5: Insert into PastBookings with status 'cancelled'
+    await pool.query(
+      `INSERT INTO PastBookings (
+        booking_id, booking_date, travel_date, vehicle_type,
+        number_of_passengers, pickup_location, drop_location,
+        user_id, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')`,
+      [
+        booking.booking_id,
+        booking.booking_date,
+        booking.travel_date,
+        booking.vehicle_type,
+        booking.number_of_passengers,
+        booking.pickup_location,
+        booking.drop_location,
+        booking.user_id
+      ]
+    );
 
-        await pool.query('COMMIT');
-
-        return {
-          success: false,
-          message: "This is a past booking that has been marked as completed"
-        };
-      }
-
-      // For current/future bookings, proceed with cancellation
-      await pool.query(
-        `INSERT INTO PastBookings (
-          booking_id, booking_date, travel_date, vehicle_type,
-          number_of_passengers, pickup_location, drop_location,
-          user_id, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'cancelled')`,
-        [
-          booking.booking_id,
-          booking.booking_date,
-          booking.travel_date,
-          booking.vehicle_type,
-          booking.number_of_passengers,
-          booking.pickup_location,
-          booking.drop_location,
-          booking.user_id
-        ]
-      );
-
-      // Delete from TaxiAvailabilityByDate
-      await pool.query(
-        `DELETE FROM TaxiAvailabilityByDate 
+    // Step 6: If the booking is a future or same-day trip, update availability
+    if (travelDate >= today) {
+      const [availability] = await pool.query(
+        `SELECT * FROM TaxiAvailabilityByDate 
          WHERE travel_date = ? AND vehicle_type = ?`,
         [booking.travel_date, booking.vehicle_type]
       );
 
-      // For same-day bookings, also update AvailableTaxis table
-      if (travelDate.toDateString() === today.toDateString()) {
-        let checkColumn;
-        switch (booking.vehicle_type) {
-          case "Sedan": checkColumn = "Sedan_Available"; break;
-          case "Hatchback": checkColumn = "Hatchback_Available"; break;
-          case "SUV": checkColumn = "SUV_Available"; break;
-          case "Prime_SUV": checkColumn = "Prime_SUV_Available"; break;
-        }
-
+      if (availability.length > 0) {
         await pool.query(
-          `UPDATE AvailableTaxis 
-           SET ${checkColumn} = ${checkColumn} + 1
-           WHERE pickup_location = ? AND drop_location = ?`,
-          [booking.pickup_location, booking.drop_location]
+          `UPDATE TaxiAvailabilityByDate 
+           SET available_count = available_count + 1
+           WHERE travel_date = ? AND vehicle_type = ?`,
+          [booking.travel_date, booking.vehicle_type]
         );
       }
 
-      // Delete from BookingTaxis
-      await pool.query(
-        'DELETE FROM BookingTaxis WHERE booking_id = ?',
-        [bookingId]
-      );
+      // Step 7: Same-day availability update
+      if (travelDate.toDateString() === today.toDateString()) {
+        const columnMap = {
+          "Sedan": "Sedan_Available",
+          "Hatchback": "Hatchback_Available",
+          "SUV": "SUV_Available",
+          "Prime_SUV": "Prime_SUV_Available"
+        };
 
-      await pool.query('COMMIT');
-
-      return {
-        success: true,
-        message: "Booking cancelled successfully",
-        data: {
-          bookingId: booking.booking_id,
-          travelDate: booking.travel_date,
-          vehicleType: booking.vehicle_type,
-          pickupLocation: booking.pickup_location,
-          dropLocation: booking.drop_location
+        const checkColumn = columnMap[booking.vehicle_type];
+        if (checkColumn) {
+          await pool.query(
+            `UPDATE AvailableTaxis 
+             SET ${checkColumn} = ${checkColumn} + 1
+             WHERE pickup_location = ? AND drop_location = ?`,
+            [booking.pickup_location, booking.drop_location]
+          );
         }
-      };
-    } catch (error) {
-      await pool.query('ROLLBACK');
-      throw error;
+      }
     }
+
+    // Step 8: Commit transaction
+    await pool.query('COMMIT');
+
+    return {
+      success: true,
+      status: 'cancelled',
+      message: "Booking cancelled successfully",
+      data: {
+        bookingId: booking.booking_id,
+        travelDate: booking.travel_date,
+        vehicleType: booking.vehicle_type,
+        pickupLocation: booking.pickup_location,
+        dropLocation: booking.drop_location,
+        status: 'cancelled'
+      }
+    };
   } catch (error) {
+    await pool.query('ROLLBACK');
     console.error("Error cancelling booking:", error);
     return {
       success: false,
+      status: 'error',
       message: "Failed to cancel booking",
       error: error.message
     };
   }
 };
+
+
 
 // Update module exports
 module.exports = {

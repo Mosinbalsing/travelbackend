@@ -155,17 +155,31 @@ const storeUserDetailsService = async (userData) => {
     try {
         const { name, email, mobile } = userData;
         
-        // Check if user already exists
+        // Check if user already exists with the same email
         const [existingUser] = await pool.execute(
-            'SELECT * FROM User WHERE mobile = ? OR email = ?',
-            [mobile, email]
+            'SELECT * FROM User WHERE email = ?',
+            [email]
         );
 
         if (existingUser.length > 0) {
             return {
-                success: true,
-                message: "User already exists",
-                data: existingUser[0]
+                success: false,
+                message: "Email already exists. Please choose a different email address.",
+                data: null
+            };
+        }
+
+        // Check if user already exists with the same mobile
+        const [existingMobile] = await pool.execute(
+            'SELECT * FROM User WHERE mobile = ?',
+            [mobile]
+        );
+
+        if (existingMobile.length > 0) {
+            return {
+                success: false,
+                message: "Mobile number already exists. Please use a different mobile number.",
+                data: null
             };
         }
 
@@ -187,7 +201,11 @@ const storeUserDetailsService = async (userData) => {
         };
     } catch (error) {
         console.error('Error storing user details:', error);
-        throw error;
+        return {
+            success: false,
+            message: "Failed to store user details",
+            error: error.message
+        };
     }
 };
 

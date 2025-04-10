@@ -261,6 +261,7 @@ router.get('/bookings', verifyAdmin, async (req, res) => {
                 b.number_of_passengers,
                 b.status,
                 b.booking_date,
+                b.user_id,
                 u.name as user_name,
                 u.email as user_email,
                 u.mobile as user_mobile,
@@ -402,7 +403,7 @@ router.delete('/users/delete/:userId', verifyAdmin, async (req, res) => {
     try {
         const userId = req.params.userId;
         const { reason } = req.body;
-        const adminEmail = req.admin.email; // Get admin email directly from the token
+        const adminEmail = req.admin.email;
 
         // Validate reason
         if (!reason) {
@@ -449,61 +450,39 @@ router.delete('/users/delete/:userId', verifyAdmin, async (req, res) => {
                 );
             }
 
-            // 4. Move active bookings to PastBookings with cancelled status
-            if (activeBookings.length > 0) {
-                // First, insert into PastBookings without copying the booking_id
-                await pool.execute(
-                    `INSERT INTO PastBookings 
-                     (booking_date, travel_date, vehicle_type, 
-                      number_of_passengers, pickup_location, drop_location, 
-                      user_id, status)
-                     SELECT 
-                        booking_date, 
-                        travel_date, 
-                        vehicle_type,
-                        number_of_passengers, 
-                        pickup_location, 
-                        drop_location,
-                        user_id, 
-                        'cancelled'
-                     FROM BookingTaxis
-                     WHERE user_id = ? AND status = 'confirmed'`,
-                    [userId]
-                );
-
-                // Then delete from BookingTaxis
-                await pool.execute(
-                    'DELETE FROM BookingTaxis WHERE user_id = ? AND status = "confirmed"',
-                    [userId]
-                );
-            }
-
-            // 5. Check if DeletedUsers table exists, if not create it
-            await pool.execute(`
-                CREATE TABLE IF NOT EXISTS DeletedUsers (
-                    deleted_user_id INT PRIMARY KEY AUTO_INCREMENT,
-                    user_id INT,
-                    name VARCHAR(100),
-                    email VARCHAR(100),
-                    mobile VARCHAR(15),
-                    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    reason VARCHAR(255),
-                    deleted_by VARCHAR(100)
-                )
-            `);
-
-            // 6. Store user in DeletedUsers table
+            // 4. Move active bookings to PastBookings
             await pool.execute(
-                `INSERT INTO DeletedUsers 
-                 (user_id, name, email, mobile, reason, deleted_by)
+                `INSERT INTO PastBookings 
+                 (booking_date, travel_date, vehicle_type, 
+                  number_of_passengers, pickup_location, drop_location, 
+                  user_id, status)
+                 SELECT 
+                    booking_date, travel_date, vehicle_type,
+                    number_of_passengers, pickup_location, drop_location,
+                    user_id, 'cancelled'
+                 FROM BookingTaxis 
+                 WHERE user_id = ?`,
+                [userId]
+            );
+
+            // 5. Delete bookings from BookingTaxis
+            await pool.execute(
+                'DELETE FROM BookingTaxis WHERE user_id = ?',
+                [userId]
+            );
+
+            // 6. Archive user data
+            await pool.execute(
+                `INSERT INTO userDeleted 
+                 (user_id, name, email, mobile, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?)`,
                 [
                     user.user_id,
                     user.name,
                     user.email,
                     user.mobile,
-                    reason,
-                    adminEmail
+                    user.created_at,
+                    user.updated_at
                 ]
             );
 
@@ -513,35 +492,29 @@ router.delete('/users/delete/:userId', verifyAdmin, async (req, res) => {
                 [userId]
             );
 
-            // 8. Delete the user
+            // 8. Delete user from User table
             await pool.execute(
                 'DELETE FROM User WHERE user_id = ?',
                 [userId]
             );
 
             // Commit the transaction
-            await connection.commit();
             await pool.query('COMMIT');
 
             return res.json({
                 success: true,
                 message: "User deleted successfully",
                 data: {
-                    deletedUser: {
-                        user_id: user.user_id,
-                        name: user.name,
-                        email: user.email,
-                        mobile: user.mobile,
-                        deleted_at: new Date(),
-                        reason: reason,
-                        deleted_by: adminEmail
-                    },
+                    userId: user.user_id,
+                    name: user.name,
+                    email: user.email,
+                    reason: reason,
+                    deletedBy: adminEmail,
                     cancelledBookings: activeBookings.length
                 }
             });
-
         } catch (error) {
-            // Rollback in case of any error
+            // Rollback the transaction on error
             await pool.query('ROLLBACK');
             throw error;
         }
@@ -552,11 +525,6 @@ router.delete('/users/delete/:userId', verifyAdmin, async (req, res) => {
             message: "Failed to delete user",
             error: error.message
         });
-    } finally {
-        // Release the connection back to the pool
-        if (connection) {
-            connection.release();
-        }
     }
 });
 

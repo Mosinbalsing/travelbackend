@@ -2,15 +2,7 @@ const { pool } = require("../config/db");
 
 const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
     try {
-        // Create tables in correct order
-        await createUserTable();
-        await createTaxiInventoryTable();
-        await createPastBookingsTable();
-        await createBookingTaxisTable();
-
-        // Handle past bookings
-        await handlePastBookings();
-
+        // Validate input parameters
         if (!pickupLocation || !dropLocation || !date) {
             return {
                 success: false,
@@ -18,174 +10,95 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
             };
         }
 
-        await insertInitialTaxiInventory(pickupLocation, dropLocation);
+        // Format date to YYYY-MM-DD
+        const formattedDate = new Date(date).toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
 
-        // First, let's check the raw data in AvailableTaxis
-        const [rawData] = await pool.query(
-            `SELECT * FROM AvailableTaxis 
-             WHERE pickup_location = ? AND drop_location = ?`,
-            [pickupLocation, dropLocation]
-        );
-        console.log('Raw AvailableTaxis data:', rawData[0]);
-
-        // Then check existing bookings
-        const [bookings] = await pool.query(
-            `SELECT vehicle_type, COUNT(*) as booked_count 
-             FROM BookingTaxis 
-             WHERE pickup_location = ? 
-             AND drop_location = ? 
-             AND travel_date = ? 
-             AND status = 'confirmed'
-             GROUP BY vehicle_type`,
-            [pickupLocation, dropLocation, date]
-        );
-        console.log('Current bookings:', bookings);
-
-        // Now get available vehicles with detailed logging
-        const [rows] = await pool.query(`
-            SELECT 
-                t.*,
-                (t.Sedan_Available - COALESCE(
-                    (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE vehicle_type = 'Sedan' 
-                    AND travel_date = ? 
-                    AND status = 'confirmed'), 0
-                )) as actual_sedan_available,
-                (t.Hatchback_Available - COALESCE(
-                    (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE vehicle_type = 'Hatchback' 
-                    AND travel_date = ? 
-                    AND status = 'confirmed'), 0
-                )) as actual_hatchback_available,
-                (t.SUV_Available - COALESCE(
-                    (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE vehicle_type = 'SUV' 
-                    AND travel_date = ? 
-                    AND status = 'confirmed'), 0
-                )) as actual_suv_available,
-                (t.Prime_SUV_Available - COALESCE(
-                    (SELECT COUNT(*) FROM BookingTaxis 
-                    WHERE vehicle_type = 'Prime_SUV' 
-                    AND travel_date = ? 
-                    AND status = 'confirmed'), 0
-                )) as actual_prime_suv_available,
-                (SELECT COUNT(*) FROM BookingTaxis 
-                WHERE vehicle_type = 'Sedan' 
-                AND travel_date = ? 
-                AND status = 'confirmed') as sedan_booked_count,
-                (SELECT COUNT(*) FROM BookingTaxis 
-                WHERE vehicle_type = 'Hatchback' 
-                AND travel_date = ? 
-                AND status = 'confirmed') as hatchback_booked_count,
-                (SELECT COUNT(*) FROM BookingTaxis 
-                WHERE vehicle_type = 'SUV' 
-                AND travel_date = ? 
-                AND status = 'confirmed') as suv_booked_count,
-                (SELECT COUNT(*) FROM BookingTaxis 
-                WHERE vehicle_type = 'Prime_SUV' 
-                AND travel_date = ? 
-                AND status = 'confirmed') as prime_suv_booked_count
-            FROM AvailableTaxis t
-            WHERE t.pickup_location = ? 
-            AND t.drop_location = ?
-        `, [date, date, date, date, date, date, date, date, pickupLocation, dropLocation]);
-
-        if (rows.length === 0) {
+        // Check if date is in the past
+        if (formattedDate < today) {
             return {
                 success: false,
-                message: "No taxis available for this route and date"
+                message: "Cannot book for past dates"
             };
         }
 
-        const row = rows[0];
+        // Get available taxis for the route
+        const [routeData] = await pool.query(`
+            SELECT * FROM AvailableTaxis 
+            WHERE pickup_location = ? AND drop_location = ?
+        `, [pickupLocation, dropLocation]);
+
+        if (!routeData || routeData.length === 0) {
+            return {
+                success: false,
+                message: "No taxis available for this route"
+            };
+        }
+
+        const route = routeData[0];
         const availableVehicles = [];
 
-        // Debug log all availability counts
-        console.log('Availability counts:', {
-            sedan: {
-                total: row.Sedan_Available,
-                actual: row.actual_sedan_available,
-                price: row.Sedan_Price
-            },
-            hatchback: {
-                total: row.Hatchback_Available,
-                actual: row.actual_hatchback_available,
-                price: row.Hatchback_Price
-            },
-            suv: {
-                total: row.SUV_Available,
-                actual: row.actual_suv_available,
-                price: row.SUV_Price
-            },
-            primeSuv: {
-                total: row.Prime_SUV_Available,
-                actual: row.actual_prime_suv_available,
-                price: row.Prime_SUV_Price
+        // Check availability for each vehicle type
+        const vehicleTypes = [
+            { type: 'Sedan', available: 'Sedan_Available', price: 'Sedan_Price' },
+            { type: 'Hatchback', available: 'Hatchback_Available', price: 'Hatchback_Price' },
+            { type: 'SUV', available: 'SUV_Available', price: 'SUV_Price' },
+            { type: 'Prime_SUV', available: 'Prime_SUV_Available', price: 'Prime_SUV_Price' }
+        ];
+
+        for (const vehicle of vehicleTypes) {
+            // Get total available count from AvailableTaxis
+            const totalAvailable = route[vehicle.available];
+            const price = route[vehicle.price];
+
+            // Get global availability for this specific date from TaxiAvailabilityByDate
+            const [dateAvailability] = await pool.query(`
+                SELECT available_count, restoration_time
+                FROM TaxiAvailabilityByDate
+                WHERE travel_date = ? 
+                AND vehicle_type = ?
+            `, [formattedDate, vehicle.type]);
+
+            let actualAvailable = totalAvailable;
+
+            // If there's a record for this date, use its available_count
+            if (dateAvailability && dateAvailability.length > 0) {
+                actualAvailable = dateAvailability[0].available_count;
             }
-        });
 
-        // Add vehicles with actual available counts and prices
-        if (row.actual_sedan_available > 0) {
-            availableVehicles.push({
-                type: 'Sedan',
-                price: Number(row.Sedan_Price),
-                availableCount: row.actual_sedan_available,
-                totalCount: row.Sedan_Available,
-                bookedCount: row.sedan_booked_count,
-                message: `${row.actual_sedan_available} out of ${row.Sedan_Available} Sedans available for ₹${row.Sedan_Price}`
-            });
+            // Only add to availableVehicles if there are actually available vehicles
+            if (actualAvailable > 0) {
+                availableVehicles.push({
+                    type: vehicle.type,
+                    price: Number(price),
+                    availableCount: actualAvailable,
+                    totalCount: totalAvailable,
+                    message: `${actualAvailable} out of ${totalAvailable} ${vehicle.type}s available for ₹${price}`
+                });
+            }
         }
 
-        if (row.actual_hatchback_available > 0) {
-            availableVehicles.push({
-                type: 'Hatchback',
-                price: Number(row.Hatchback_Price),
-                availableCount: row.actual_hatchback_available,
-                totalCount: row.Hatchback_Available,
-                bookedCount: row.hatchback_booked_count,
-                message: `${row.actual_hatchback_available} out of ${row.Hatchback_Available} Hatchbacks available for ₹${row.Hatchback_Price}`
-            });
+        // If no vehicles are available at all
+        if (availableVehicles.length === 0) {
+            return {
+                success: false,
+                message: "No vehicles available for this date"
+            };
         }
-
-        if (row.actual_suv_available > 0) {
-            availableVehicles.push({
-                type: 'SUV',
-                price: Number(row.SUV_Price),
-                availableCount: row.actual_suv_available,
-                totalCount: row.SUV_Available,
-                bookedCount: row.suv_booked_count,
-                message: `${row.actual_suv_available} out of ${row.SUV_Available} SUVs available for ₹${row.SUV_Price}`
-            });
-        }
-
-        if (row.actual_prime_suv_available > 0) {
-            availableVehicles.push({
-                type: 'Prime_SUV',
-                price: Number(row.Prime_SUV_Price),
-                availableCount: row.actual_prime_suv_available,
-                totalCount: row.Prime_SUV_Available,
-                bookedCount: row.prime_suv_booked_count,
-                message: `${row.actual_prime_suv_available} out of ${row.Prime_SUV_Available} Prime SUVs available for ₹${row.Prime_SUV_Price}`
-            });
-        }
-
-        console.log('Final available vehicles:', availableVehicles);
 
         return {
             success: true,
             message: "Available taxis found successfully",
             data: {
-                routeId: row.TaxiID,
-                pickupLocation: row.pickup_location,
-                dropLocation: row.drop_location,
-                availableDate: date,
-                availableVehicles: availableVehicles,
-                currentBookings: bookings,
+                pickupLocation,
+                dropLocation,
+                date: formattedDate,
+                availableVehicles,
                 prices: {
-                    Sedan: Number(row.Sedan_Price),
-                    Hatchback: Number(row.Hatchback_Price),
-                    SUV: Number(row.SUV_Price),
-                    Prime_SUV: Number(row.Prime_SUV_Price)
+                    Sedan: Number(route.Sedan_Price),
+                    Hatchback: Number(route.Hatchback_Price),
+                    SUV: Number(route.SUV_Price),
+                    Prime_SUV: Number(route.Prime_SUV_Price)
                 }
             }
         };

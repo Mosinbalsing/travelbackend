@@ -398,7 +398,7 @@ router.get('/deleted-user-bookings', verifyAdmin, async (req, res) => {
 });
 
 // Delete user and handle related operations
-router.delete('/users/:userId', verifyAdmin, async (req, res) => {
+router.delete('/users/delete/:userId', verifyAdmin, async (req, res) => {
     try {
         const userId = req.params.userId;
         const { reason } = req.body;

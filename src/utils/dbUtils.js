@@ -104,6 +104,22 @@ const createTablesIfNotExist = async () => {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
 
+        // Create TaxiAvailabilityByDate table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS TaxiAvailabilityByDate (
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                travel_date DATE NOT NULL,
+                vehicle_type ENUM('Sedan', 'Hatchback', 'SUV', 'Prime_SUV') NOT NULL,
+                pickup_location VARCHAR(255),
+                drop_location VARCHAR(255),
+                available_count INT DEFAULT 0,
+                restoration_time DATETIME,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY date_vehicle (travel_date, vehicle_type)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+
         // Finally, create the BookingTaxis table with the foreign key
         await pool.query(`
             CREATE TABLE IF NOT EXISTS BookingTaxis (
@@ -135,6 +151,7 @@ const initializeDatabase = async () => {
     try {
         // Drop existing tables if they exist
         await pool.query('DROP TABLE IF EXISTS BookingTaxis');
+        await pool.query('DROP TABLE IF EXISTS TaxiAvailabilityByDate');
         await pool.query('DROP TABLE IF EXISTS AvailableTaxis');
         await pool.query('DROP TABLE IF EXISTS Users'); // Note: Users not User
 
@@ -169,6 +186,7 @@ const createAdminTable = async () => {
             mobile: '9730260479'
         };
 
+        
         // Check if admin exists
         const [existing] = await pool.query('SELECT * FROM Admin WHERE email = ?', [defaultAdmin.email]);
         

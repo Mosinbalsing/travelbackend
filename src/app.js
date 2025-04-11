@@ -7,6 +7,7 @@ const authRoutes = require('./routes/authRoutes');
 const taxiRoutes = require('./routes/taxiRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const contactRoutes = require('./routes/contactRoutes');
 const { createAdminTable, createUserDeletedTable } = require('./utils/dbUtils');
 
 const app = express();
@@ -29,6 +30,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/taxis', taxiRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/contact', contactRoutes);
 
 const startServer = async () => {
     try {

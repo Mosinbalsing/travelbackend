@@ -118,8 +118,8 @@ router.get('/users', verifyAdmin, async (req, res) => {
                     WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
                     WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
                 END as price
-            FROM bookingtaxis b
-            LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
+            FROM BookingTaxis b
+            LEFT JOIN availabletaxis a ON b.pickup_location = a.pickup_location 
                 AND b.drop_location = a.drop_location
             ORDER BY b.travel_date DESC
         `);
@@ -143,7 +143,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
                     WHEN pb.vehicle_type = 'SUV' THEN a.SUV_Price
                     WHEN pb.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
                 END as price
-            FROM pastbookings pb
+            FROM PastBookings pb
             LEFT JOIN AvailableTaxis a ON pb.pickup_location = a.pickup_location 
                 AND pb.drop_location = a.drop_location
             WHERE pb.user_id IS NOT NULL
@@ -207,7 +207,7 @@ router.put('/users/:userId', verifyAdmin, async (req, res) => {
 
         // Check if user exists
         const [existingUsers] = await pool.execute(
-            'SELECT * FROM user WHERE user_id = ?',
+            'SELECT * FROM User WHERE user_id = ?',
             [userId]
         );
 
@@ -220,13 +220,13 @@ router.put('/users/:userId', verifyAdmin, async (req, res) => {
 
         // Update user
         await pool.execute(
-            'UPDATE user SET name = ?, email = ?, mobile = ? WHERE user_id = ?',
+            'UPDATE User SET name = ?, email = ?, mobile = ? WHERE user_id = ?',
             [name, email, mobile, userId]
         );
 
         // Fetch updated user data
         const [updatedUsers] = await pool.execute(
-            'SELECT user_id, name, email, mobile FROM user WHERE user_id = ?',
+            'SELECT user_id, name, email, mobile FROM User WHERE user_id = ?',
             [userId]
         );
 
@@ -271,7 +271,7 @@ router.get('/bookings', verifyAdmin, async (req, res) => {
                     WHEN b.vehicle_type = 'SUV' THEN a.SUV_Price
                     WHEN b.vehicle_type = 'Prime_SUV' THEN a.Prime_SUV_Price
                 END as price
-            FROM bookingtaxis b
+            FROM BookingTaxis b
             LEFT JOIN User u ON b.user_id = u.user_id
             LEFT JOIN AvailableTaxis a ON b.pickup_location = a.pickup_location 
                 AND b.drop_location = a.drop_location

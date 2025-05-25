@@ -89,7 +89,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
             SELECT 
                 user_id,
                 COUNT(*) as past_bookings_count
-            FROM pastbookings
+            FROM PastBookings
             GROUP BY user_id
         `);
         

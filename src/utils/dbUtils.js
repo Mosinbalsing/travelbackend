@@ -230,7 +230,7 @@ const insertDefaultAdmin = async () => {
         throw error;
     }
 };
-insertDefaultAdmin()
+// insertDefaultAdmin()
 const createUserDeletedTable = async () => {
     try {
         await pool.query(`

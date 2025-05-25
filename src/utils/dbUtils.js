@@ -210,6 +210,7 @@ const createAdminTable = async () => {
 const insertDefaultAdmin = async () => {
     try {
         const defaultAdmin = {
+            admin_id: 1,
             email: "mosinbalsing@gmail.com",
             password: "Admin123",
             mobile: "9730260479"
@@ -219,8 +220,8 @@ const insertDefaultAdmin = async () => {
         if (existing.length === 0) {
             const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
             await pool.query(
-                "INSERT INTO admin (email, password, mobile) VALUES (?, ?, ?)",
-                [defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
+                "INSERT INTO admin ( admin_id, email, password, mobile) VALUES (?, ?, ?, ?)",
+                [ defaultAdmin.admin_id ,defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
             );
             console.log("✅ Default admin account created successfully!");
         }

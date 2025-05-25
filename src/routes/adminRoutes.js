@@ -78,7 +78,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
                 u.updated_at,
                 COUNT(DISTINCT b.booking_id) as total_bookings,
                 COUNT(DISTINCT CASE WHEN b.status = 'pending' OR b.status = 'confirmed' THEN b.booking_id END) as active_bookings
-            FROM user u
+            FROM User u
             LEFT JOIN bookingtaxis b ON u.user_id = b.user_id
             GROUP BY u.user_id, u.name, u.email, u.mobile, u.created_at, u.updated_at
             ORDER BY u.created_at DESC

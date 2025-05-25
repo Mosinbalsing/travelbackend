@@ -16,7 +16,7 @@ const adminLogin = async (credentials) => {
 
         // Check if admin exists
         const [admins] = await pool.query(
-                WHERE email = ?',
+            'SELECT * FROM admin WHERE email = ?',
             [credentials.email]
         );
 

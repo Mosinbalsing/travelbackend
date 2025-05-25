@@ -24,7 +24,7 @@ const getAvailableTaxis = async (pickupLocation, dropLocation, date) => {
 
         // Get available taxis for the route
         const [routeData] = await pool.query(`
-            SELECT * FROM AvailableTaxis 
+            SELECT * FROM availabletaxis 
             WHERE pickup_location = ? AND drop_location = ?
         `, [pickupLocation, dropLocation]);
 
@@ -212,7 +212,7 @@ const storeUserDetailsService = async (userData) => {
 const createTaxiInventoryTable = async () => {
     try {
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS AvailableTaxis (
+            CREATE TABLE IF NOT EXISTS availabletaxis (
                 TaxiID INT PRIMARY KEY AUTO_INCREMENT,
                 pickup_location VARCHAR(100),
                 drop_location VARCHAR(100),
@@ -275,13 +275,13 @@ const cleanupExpiredBookings = async () => {
 const insertInitialTaxiInventory = async (pickupLocation, dropLocation) => {
     try {
         const [existing] = await pool.query(
-            'SELECT * FROM AvailableTaxis WHERE pickup_location = ? AND drop_location = ?',
+            'SELECT * FROM availabletaxis WHERE pickup_location = ? AND drop_location = ?',
             [pickupLocation, dropLocation]
         );
 
         if (existing.length === 0) {
             await pool.query(`
-                INSERT INTO AvailableTaxis (
+                INSERT INTO availabletaxis (
                     pickup_location, 
                     drop_location, 
                     Sedan_Available, 
@@ -309,12 +309,12 @@ const updateAllTaxiInventory = async () => {
 
         try {
             // First verify if we have any data
-            const [checkData] = await pool.query('SELECT COUNT(*) as count FROM AvailableTaxis');
+            const [checkData] = await pool.query('SELECT COUNT(*) as count FROM availabletaxis');
             console.log('Current rows in database:', checkData[0].count);
 
             // Update all rows with new values
             const [result] = await pool.query(`
-                UPDATE AvailableTaxis 
+                UPDATE availabletaxis 
                 SET 
                     Sedan_Available = 2,
                     Hatchback_Available = 4,
@@ -323,13 +323,13 @@ const updateAllTaxiInventory = async () => {
             `);
 
             // Verify the update
-            const [verifyUpdate] = await pool.query('SELECT * FROM AvailableTaxis LIMIT 1');
+            const [verifyUpdate] = await pool.query('SELECT * FROM availabletaxis LIMIT 1');
             console.log('Sample row after update:', verifyUpdate[0]);
 
             // If everything is successful, commit the transaction
             await pool.query('COMMIT');
             
-            console.log(`Updated ${result.affectedRows} rows in AvailableTaxis table`);
+            console.log(`Updated ${result.affectedRows} rows in availabletaxis table`);
             return {
                 success: true,
                 message: `Successfully updated ${result.affectedRows} routes with new vehicle counts`,
@@ -415,7 +415,7 @@ const decrementAvailableTaxis = async (vehicleType, pickupLocation, dropLocation
         }
 
         await pool.query(`
-            UPDATE AvailableTaxis 
+            UPDATE availabletaxis 
             SET ${updateColumn} = ${updateColumn} - 1
             WHERE PickupLocation = ? 
             AND DropLocation = ?
@@ -450,7 +450,7 @@ const incrementAvailableTaxis = async (vehicleType, pickupLocation, dropLocation
         }
 
         await pool.query(`
-            UPDATE AvailableTaxis 
+            UPDATE availabletaxis 
             SET ${updateColumn} = ${updateColumn} + 1
             WHERE PickupLocation = ? 
             AND DropLocation = ?

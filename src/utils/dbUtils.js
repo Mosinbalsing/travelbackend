@@ -188,7 +188,7 @@ const createAdminTable = async () => {
 
         
         // Check if admin exists
-        const [existing] = await pool.query('SELECT * FROM Admin WHERE email = ?', [defaultAdmin.email]);
+        const [existing] = await pool.query('SELECT * FROM admin WHERE email = ?', [defaultAdmin.email]);
         
         if (existing.length === 0) {
             // Hash the password before storing
@@ -196,7 +196,7 @@ const createAdminTable = async () => {
             
             // Insert the admin record
             await pool.query(
-                'INSERT INTO Admin (email, password, mobile) VALUES (?, ?, ?)',
+                'INSERT INTO admin (email, password, mobile) VALUES (?, ?, ?)',
                 [defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
             );
             console.log('Default admin account created successfully');
@@ -215,11 +215,11 @@ const insertDefaultAdmin = async () => {
             mobile: "9730260479"
         };
 
-        const [existing] = await pool.query("SELECT * FROM Admin WHERE email = ?", [defaultAdmin.email]);
+        const [existing] = await pool.query("SELECT * FROM admin WHERE email = ?", [defaultAdmin.email]);
         if (existing.length === 0) {
             const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
             await pool.query(
-                "INSERT INTO Admin (email, password, mobile) VALUES (?, ?, ?)",
+                "INSERT INTO admin (email, password, mobile) VALUES (?, ?, ?)",
                 [defaultAdmin.email, hashedPassword, defaultAdmin.mobile]
             );
             console.log("✅ Default admin account created successfully!");
